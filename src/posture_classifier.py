@@ -1,0 +1,171 @@
+import mediapipe as mp
+import statistics
+from collections import deque
+from src.feature_utils import calculate_distance, get_midpoint
+
+class PostureClassifier:
+    """
+    A class to extract facial/body features and classify learning postures
+    using a rule-based approach with temporal smoothing.
+    """
+    
+    def __init__(self):
+        """Initializes the MediaPipe pose model, thresholds, and temporal buffers."""
+        self.mp_pose = mp.solutions.pose
+        self.baseline_features = None 
+        
+        # --- TEMPORAL SMOOTHING SETUP ---
+        # Stores the labels of the last 20 frames (~0.7 - 1 second)
+        self.history_length = 20
+        self.label_history = deque(maxlen=self.history_length)
+        
+        # --- GEOMETRIC THRESHOLDS ---
+        self.THRESH_HAND_TO_FACE = 0.55  # Distance ratio for hand close to face
+        self.THRESH_SLOUCH_Y = 0.55      # Neck drop ratio (allows slight drop for writing)
+        self.THRESH_SLOUCH_Z = 1.40      # Forward lean ratio (z-axis depth)
+
+    def get_landmark_px(self, landmark, w, h):
+        """
+        Converts normalized landmark coordinates to absolute pixel coordinates.
+        
+        Args:
+            landmark (object): MediaPipe landmark object containing x, y.
+            w (int): Width of the image frame.
+            h (int): Height of the image frame.
+            
+        Returns:
+            tuple: (x, y) absolute pixel coordinates.
+        """
+        return (int(landmark.x * w), int(landmark.y * h))
+
+    def extract_features(self, landmarks, w, h):
+        """
+        Extracts key distances, ratios, and coordinates from pose landmarks.
+        
+        Args:
+            landmarks (list): List of MediaPipe pose landmarks.
+            w (int): Frame width.
+            h (int): Frame height.
+            
+        Returns:
+            dict: A dictionary containing extracted posture features and core coordinates.
+        """
+        # Extract absolute coordinates
+        nose = self.get_landmark_px(landmarks[self.mp_pose.PoseLandmark.NOSE.value], w, h)
+        l_shoulder = self.get_landmark_px(landmarks[self.mp_pose.PoseLandmark.LEFT_SHOULDER.value], w, h)
+        r_shoulder = self.get_landmark_px(landmarks[self.mp_pose.PoseLandmark.RIGHT_SHOULDER.value], w, h)
+        l_ear = self.get_landmark_px(landmarks[self.mp_pose.PoseLandmark.LEFT_EAR.value], w, h)
+        r_ear = self.get_landmark_px(landmarks[self.mp_pose.PoseLandmark.RIGHT_EAR.value], w, h)
+        l_wrist = self.get_landmark_px(landmarks[self.mp_pose.PoseLandmark.LEFT_WRIST.value], w, h)
+        r_wrist = self.get_landmark_px(landmarks[self.mp_pose.PoseLandmark.RIGHT_WRIST.value], w, h)
+
+        # Extract depth (Z-axis) coordinates
+        nose_z = landmarks[self.mp_pose.PoseLandmark.NOSE.value].z
+        l_shoulder_z = landmarks[self.mp_pose.PoseLandmark.LEFT_SHOULDER.value].z
+        r_shoulder_z = landmarks[self.mp_pose.PoseLandmark.RIGHT_SHOULDER.value].z
+        mid_shoulder_z = (l_shoulder_z + r_shoulder_z) / 2
+
+        # Calculate midpoints and reference widths
+        mid_shoulder = get_midpoint(l_shoulder, r_shoulder)
+        mid_ear = get_midpoint(l_ear, r_ear)
+        shoulder_width = calculate_distance(l_shoulder, r_shoulder) or 1 
+
+        # Calculate core features
+        neck_length_y = abs(mid_shoulder[1] - mid_ear[1])
+        neck_ratio = neck_length_y / shoulder_width
+        forward_lean_z = mid_shoulder_z - nose_z 
+        
+        shoulder_tilt_ratio = abs(l_shoulder[1] - r_shoulder[1]) / shoulder_width
+        head_tilt_ratio = abs(l_ear[1] - r_ear[1]) / shoulder_width
+        
+        # Calculate minimum distance from either hand to the face
+        min_hand_to_face = 999.0 
+        
+        # High sensitivity (visibility > 0.2) to detect partially occluded hands
+        if landmarks[self.mp_pose.PoseLandmark.LEFT_WRIST.value].visibility > 0.2:
+            dist = min(calculate_distance(l_wrist, l_ear), calculate_distance(l_wrist, nose))
+            min_hand_to_face = min(min_hand_to_face, dist / shoulder_width)
+            
+        if landmarks[self.mp_pose.PoseLandmark.RIGHT_WRIST.value].visibility > 0.2:
+            dist = min(calculate_distance(r_wrist, r_ear), calculate_distance(r_wrist, nose))
+            min_hand_to_face = min(min_hand_to_face, dist / shoulder_width)
+
+        return {
+            "neck_ratio": neck_ratio,
+            "forward_lean_z": forward_lean_z,
+            "shoulder_tilt_ratio": shoulder_tilt_ratio,
+            "head_tilt_ratio": head_tilt_ratio,
+            "hand_to_face_ratio": min_hand_to_face,
+            "coords": {"nose": nose, "mid_shoulder": mid_shoulder, "mid_ear": mid_ear}
+        }
+
+    def set_baseline(self, features):
+        """
+        Saves the current features as the golden standard (baseline) for the user.
+        
+        Args:
+            features (dict): The features extracted from the calibration frame.
+        """
+        self.baseline_features = {
+            "neck_ratio": features["neck_ratio"],
+            "forward_lean_z": features["forward_lean_z"]
+        }
+        self.label_history.clear()
+        print("Calibration successful! Starting evaluation...")
+
+    def _get_raw_label(self, features, landmarks):
+        """
+        Internal method to classify posture based on a single frame.
+        
+        Args:
+            features (dict): Extracted features.
+            landmarks (list): MediaPipe landmarks.
+            
+        Returns:
+            str: Raw posture label.
+        """
+        # Check if the user is out of frame (Absence)
+        visibility_nose = landmarks[self.mp_pose.PoseLandmark.NOSE.value].visibility
+        visibility_l_shoulder = landmarks[self.mp_pose.PoseLandmark.LEFT_SHOULDER.value].visibility
+        visibility_r_shoulder = landmarks[self.mp_pose.PoseLandmark.RIGHT_SHOULDER.value].visibility
+        
+        if visibility_nose < 0.3 and visibility_l_shoulder < 0.3 and visibility_r_shoulder < 0.3:
+            return "Absence"
+
+        # Require calibration before classification
+        if not self.baseline_features:
+            return "Not Calibrated"
+
+        # 1. LEANING ON DESK: Hand is close to the face
+        if features["hand_to_face_ratio"] < self.THRESH_HAND_TO_FACE:
+            return "Leaning on Desk"
+
+        # 2. SLOUCHING: Neck drops significantly or head leans too far forward
+        neck_compare = features["neck_ratio"] / self.baseline_features["neck_ratio"]
+        lean_compare = features["forward_lean_z"] / (self.baseline_features["forward_lean_z"] + 0.001)
+        
+        if neck_compare < self.THRESH_SLOUCH_Y or lean_compare > self.THRESH_SLOUCH_Z:
+             return "Slouching"
+
+        # 3. FOCUSED: Default state if no violations are detected
+        return "Focused"
+
+    def classify(self, features, landmarks):
+        """
+        Returns a temporally smoothed posture label using majority voting.
+        
+        Args:
+            features (dict): Extracted features.
+            landmarks (list): MediaPipe landmarks.
+            
+        Returns:
+            str: Smoothed posture label.
+        """
+        raw_label = self._get_raw_label(features, landmarks)
+        self.label_history.append(raw_label)
+        
+        if len(self.label_history) == 0:
+            return raw_label
+            
+        # Returns the most common label in the recent history buffer
+        return statistics.mode(self.label_history)

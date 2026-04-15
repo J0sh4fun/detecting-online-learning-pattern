@@ -1,0 +1,25 @@
+# Environments
+.env
+.venv
+venv/
+env/
+
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Data and Models (Ignore large files to save Git LFS quota)
+data/
+models/
+*.csv
+*.pkl
+*.h5
+
+# OS generated files
+.DS_Store
+Thumbs.db
+
+# VS Code / IDE settings
+.vscode/
+.idea/
