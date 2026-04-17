@@ -48,19 +48,24 @@ def main():
             # Extract features and specific coordinates
             features = classifier.extract_features(landmarks, w, h)
             coords = features["coords"]
+
+            # Detech phone
+            has_phone = classifier.detect_phone(frame)
             
             # Draw visual indicator lines
             cv2.line(frame, coords["mid_shoulder"], coords["mid_ear"], (0, 255, 255), 3)
             cv2.line(frame, coords["mid_shoulder"], coords["nose"], (255, 0, 255), 3)
             
             # Classify behavior
-            label = classifier.classify(features, landmarks)
+            label = classifier.classify(features, landmarks, has_phone)
             
             # Set UI text color based on the posture label
             if label == "Focused":
                 color = (0, 255, 0)       # Green
             elif label in ["Slouching", "Leaning on Desk"]:
                 color = (0, 165, 255)     # Orange
+            elif label == 'Using Phone':
+                color = (0, 0, 255)       # Red
             else: 
                 color = (255, 255, 255)   # White
                 

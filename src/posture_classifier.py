@@ -2,6 +2,7 @@ import mediapipe as mp
 import statistics
 from collections import deque
 from src.feature_utils import calculate_distance, get_midpoint
+from ultralytics import YOLO
 
 class PostureClassifier:
     """
@@ -23,6 +24,22 @@ class PostureClassifier:
         self.THRESH_HAND_TO_FACE = 0.55  # Distance ratio for hand close to face
         self.THRESH_SLOUCH_Y = 0.55      # Neck drop ratio (allows slight drop for writing)
         self.THRESH_SLOUCH_Z = 1.40      # Forward lean ratio (z-axis depth)
+
+        # --- PHONE THRESHOLDS ---
+        self.yolo_model = YOLO('yolov8s.pt')
+        self.CELL_PHONE_CLASS_ID = 67 
+        self.THRESH_PHONE_CONF = 0.35    # Confidence Score
+        self.THRESH_CALLING = 0.25
+        
+    def detect_phone(self, frame):
+        """Sử dụng YOLOv8s trên GPU"""
+        results = self.yolo_model(frame, classes=[self.CELL_PHONE_CLASS_ID], device='0', verbose=False)
+        for r in results:
+            boxes = r.boxes
+            for box in boxes:
+                if box.conf[0].item() > self.THRESH_PHONE_CONF:
+                    return True 
+        return False
 
     def get_landmark_px(self, landmark, w, h):
         """
@@ -77,18 +94,41 @@ class PostureClassifier:
         
         shoulder_tilt_ratio = abs(l_shoulder[1] - r_shoulder[1]) / shoulder_width
         head_tilt_ratio = abs(l_ear[1] - r_ear[1]) / shoulder_width
+
+        # Caculate head yaw
+        left_dist = abs(nose[0] - l_ear[0])
+        right_dist = abs(nose[0] - r_ear[0])
+        # If looking straight ahead, the ratio is approximately 1. If turning your head, 
+        # the ratio will be very large (>2.5) or very small (<0.4).
+        head_yaw_ratio = left_dist / (right_dist + 0.001)
+        
+        # Check elevated wrist
+        wrist_elevated = False
+        # Wrists higher than chest (mid-shoulder length + half shoulder width)
+        chest_level = mid_shoulder[1] + (shoulder_width * 0.5)
         
         # Calculate minimum distance from either hand to the face
-        min_hand_to_face = 999.0 
+        min_hand_to_face = 999.0
+        min_hand_to_ear = 999.0
         
         # High sensitivity (visibility > 0.2) to detect partially occluded hands
         if landmarks[self.mp_pose.PoseLandmark.LEFT_WRIST.value].visibility > 0.2:
             dist = min(calculate_distance(l_wrist, l_ear), calculate_distance(l_wrist, nose))
             min_hand_to_face = min(min_hand_to_face, dist / shoulder_width)
+            min_hand_to_ear = min(min_hand_to_ear, calculate_distance(l_wrist, l_ear) / shoulder_width)
             
         if landmarks[self.mp_pose.PoseLandmark.RIGHT_WRIST.value].visibility > 0.2:
             dist = min(calculate_distance(r_wrist, r_ear), calculate_distance(r_wrist, nose))
             min_hand_to_face = min(min_hand_to_face, dist / shoulder_width)
+            min_hand_to_ear = min(min_hand_to_ear, calculate_distance(r_wrist, r_ear) / shoulder_width)
+
+        if landmarks[self.mp_pose.PoseLandmark.LEFT_WRIST.value].visibility > 0.2:
+            if l_wrist[1] < chest_level:
+                wrist_elevated = True
+                
+        if landmarks[self.mp_pose.PoseLandmark.RIGHT_WRIST.value].visibility > 0.2:
+            if r_wrist[1] < chest_level:
+                wrist_elevated = True
 
         return {
             "neck_ratio": neck_ratio,
@@ -96,6 +136,9 @@ class PostureClassifier:
             "shoulder_tilt_ratio": shoulder_tilt_ratio,
             "head_tilt_ratio": head_tilt_ratio,
             "hand_to_face_ratio": min_hand_to_face,
+            "hand_to_ear_ratio": min_hand_to_ear,
+            "head_yaw_ratio": head_yaw_ratio, 
+            "wrist_elevated": wrist_elevated,
             "coords": {"nose": nose, "mid_shoulder": mid_shoulder, "mid_ear": mid_ear}
         }
 
@@ -113,7 +156,7 @@ class PostureClassifier:
         self.label_history.clear()
         print("Calibration successful! Starting evaluation...")
 
-    def _get_raw_label(self, features, landmarks):
+    def _get_raw_label(self, features, landmarks, has_phone):
         """
         Internal method to classify posture based on a single frame.
         
@@ -135,6 +178,16 @@ class PostureClassifier:
         # Require calibration before classification
         if not self.baseline_features:
             return "Not Calibrated"
+        
+        # Edge-cases
+        is_head_turned = features["head_yaw_ratio"] > 2.5 or features["head_yaw_ratio"] < 0.4
+        is_reading_distance = 0.5 < features["hand_to_face_ratio"] < 1.5 # Không quá sát mặt, không quá xa
+
+        if has_phone or features["hand_to_ear_ratio"] < self.THRESH_CALLING:
+            return "Using Phone"
+        
+        if is_head_turned and features["wrist_elevated"] and is_reading_distance:
+            return "Using Phone"
 
         # 1. LEANING ON DESK: Hand is close to the face
         if features["hand_to_face_ratio"] < self.THRESH_HAND_TO_FACE:
@@ -150,7 +203,7 @@ class PostureClassifier:
         # 3. FOCUSED: Default state if no violations are detected
         return "Focused"
 
-    def classify(self, features, landmarks):
+    def classify(self, features, landmarks, has_phone=False):
         """
         Returns a temporally smoothed posture label using majority voting.
         
@@ -161,7 +214,7 @@ class PostureClassifier:
         Returns:
             str: Smoothed posture label.
         """
-        raw_label = self._get_raw_label(features, landmarks)
+        raw_label = self._get_raw_label(features, landmarks, has_phone)
         self.label_history.append(raw_label)
         
         if len(self.label_history) == 0:
