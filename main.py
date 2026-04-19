@@ -14,6 +14,9 @@ def main():
     mp_drawing = mp.solutions.drawing_utils
     classifier = PostureClassifier()
 
+    mp_face_mesh = mp.solutions.face_mesh
+    face_mesh = mp_face_mesh.FaceMesh(static_image_mode=False, max_num_faces=1, min_detection_confidence=0.5)
+
     cap = cv2.VideoCapture(0)
     print("Starting Webcam. Press 'q' to exit.")
 
@@ -29,6 +32,7 @@ def main():
         
         # Process the frame to find poses
         results = pose.process(image_rgb)
+        mesh_results = face_mesh.process(image_rgb)
         
         if not results.pose_landmarks:
             # Handle user absence
@@ -37,6 +41,8 @@ def main():
         else:
             # Handle active user
             landmarks = results.pose_landmarks.landmark
+
+            face_landmarks = mesh_results.multi_face_landmarks[0] if mesh_results.multi_face_landmarks else None
             
             # Draw faded pose landmarks in the background
             mp_drawing.draw_landmarks(
@@ -46,7 +52,7 @@ def main():
             )
             
             # Extract features and specific coordinates
-            features = classifier.extract_features(landmarks, w, h)
+            features = classifier.extract_features(landmarks, face_landmarks, w, h)
             coords = features["coords"]
 
             # Detech phone
@@ -62,6 +68,8 @@ def main():
             # Set UI text color based on the posture label
             if label == "Focused":
                 color = (0, 255, 0)       # Green
+            elif label == 'Looking Away':
+                color = (255, 0, 0)       # Blue
             elif label in ["Slouching", "Leaning on Desk"]:
                 color = (0, 165, 255)     # Orange
             elif label == 'Using Phone':
@@ -74,9 +82,8 @@ def main():
                         cv2.FONT_HERSHEY_SIMPLEX, 1, color, 2, cv2.LINE_AA)
             
             # Render debugging metrics
-            debug_text = f"Neck: {features['neck_ratio']:.2f} | Lean: {features['forward_lean_z']:.2f} | V_Tilt: {features['shoulder_tilt_ratio']:.2f} | H_Tilt: {features['head_tilt_ratio']:.2f}"
-            cv2.putText(frame, debug_text, (20, 80), 
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 200, 0), 1, cv2.LINE_AA)
+            debug_text = f"Pitch(X): {features['pose_x']:.1f} | Yaw(Y): {features['pose_y']:.1f} | Dir: {features['head_direction']}"
+            cv2.putText(frame, debug_text, (20, 80), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 200, 0), 1, cv2.LINE_AA)
             
             # Show calibration prompt if needed
             if classifier.baseline_features is None:

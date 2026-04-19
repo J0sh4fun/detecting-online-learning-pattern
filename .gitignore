@@ -15,6 +15,7 @@ models/
 *.csv
 *.pkl
 *.h5
+yolov8s.pt
 
 # OS generated files
 .DS_Store

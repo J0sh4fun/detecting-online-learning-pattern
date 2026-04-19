@@ -1,18 +1,21 @@
 import mediapipe as mp
 import statistics
 from collections import deque
-from src.feature_utils import calculate_distance, get_midpoint
+from src.feature_utils import calculate_distance, get_midpoint, estimate_head_pose
 from ultralytics import YOLO
 
 class PostureClassifier:
     """
-    A class to extract facial/body features and classify learning postures
-    using a rule-based approach with temporal smoothing.
+    Classification engine for student posture and attention detection.
+    
+    Uses MediaPipe Pose/FaceMesh for geometry and YOLO for phone detection,
+    applying temporal smoothing to ensure stable status updates.
     """
     
     def __init__(self):
-        """Initializes the MediaPipe pose model, thresholds, and temporal buffers."""
+        """Initializes AI models, temporal buffers, and geometric thresholds."""
         self.mp_pose = mp.solutions.pose
+        self.mp_face_mesh = mp.solutions.face_mesh
         self.baseline_features = None 
         
         # --- TEMPORAL SMOOTHING SETUP ---
@@ -32,7 +35,15 @@ class PostureClassifier:
         self.THRESH_CALLING = 0.25
         
     def detect_phone(self, frame):
-        """Sử dụng YOLOv8s trên GPU"""
+        """
+        Detects if a mobile phone is present in the current frame using YOLO.
+
+        Args:
+            frame: The current BGR image from the webcam.
+
+        Returns:
+            bool: True if a phone is detected with confidence > threshold.
+        """
         results = self.yolo_model(frame, classes=[self.CELL_PHONE_CLASS_ID], device='0', verbose=False)
         for r in results:
             boxes = r.boxes
@@ -55,17 +66,18 @@ class PostureClassifier:
         """
         return (int(landmark.x * w), int(landmark.y * h))
 
-    def extract_features(self, landmarks, w, h):
+    def extract_features(self, landmarks, face_landmarks, w, h):
         """
-        Extracts key distances, ratios, and coordinates from pose landmarks.
-        
+        Extracts all necessary posture features from raw MediaPipe data.
+
         Args:
-            landmarks (list): List of MediaPipe pose landmarks.
+            landmarks: MediaPipe Pose landmarks.
+            face_landmarks: MediaPipe Face Mesh landmarks.
             w (int): Frame width.
             h (int): Frame height.
-            
+
         Returns:
-            dict: A dictionary containing extracted posture features and core coordinates.
+            dict: Dictionary of calculated ratios, angles, and coordinates.
         """
         # Extract absolute coordinates
         nose = self.get_landmark_px(landmarks[self.mp_pose.PoseLandmark.NOSE.value], w, h)
@@ -130,6 +142,21 @@ class PostureClassifier:
             if r_wrist[1] < chest_level:
                 wrist_elevated = True
 
+        pose_x, pose_y, pose_z = 0, 0, 0
+        head_direction = "forward"
+
+        if face_landmarks:
+            pose_x, pose_y, pose_z = estimate_head_pose(face_landmarks, w, h)
+
+            if pose_y > 10:
+                head_direction = "right"
+            elif pose_y < -10:
+                head_direction = "left"
+            elif pose_x < -20: 
+                head_direction = "down"
+            else:
+                head_direction = "forward"
+
         return {
             "neck_ratio": neck_ratio,
             "forward_lean_z": forward_lean_z,
@@ -139,6 +166,9 @@ class PostureClassifier:
             "hand_to_ear_ratio": min_hand_to_ear,
             "head_yaw_ratio": head_yaw_ratio, 
             "wrist_elevated": wrist_elevated,
+            "head_direction": head_direction,
+            "pose_x": pose_x,
+            "pose_y": pose_y, 
             "coords": {"nose": nose, "mid_shoulder": mid_shoulder, "mid_ear": mid_ear}
         }
 
@@ -163,10 +193,12 @@ class PostureClassifier:
         Args:
             features (dict): Extracted features.
             landmarks (list): MediaPipe landmarks.
+            has_phone (boolean): Checked features.
             
         Returns:
             str: Raw posture label.
         """
+
         # Check if the user is out of frame (Absence)
         visibility_nose = landmarks[self.mp_pose.PoseLandmark.NOSE.value].visibility
         visibility_l_shoulder = landmarks[self.mp_pose.PoseLandmark.LEFT_SHOULDER.value].visibility
@@ -188,6 +220,10 @@ class PostureClassifier:
         
         if is_head_turned and features["wrist_elevated"] and is_reading_distance:
             return "Using Phone"
+        
+        direction = features["head_direction"]
+        if direction in ["left", "right"]:
+            return "Looking Away"
 
         # 1. LEANING ON DESK: Hand is close to the face
         if features["hand_to_face_ratio"] < self.THRESH_HAND_TO_FACE:
