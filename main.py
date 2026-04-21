@@ -57,18 +57,25 @@ def main():
                 mp.solutions.drawing_utils.DrawingSpec(color=(200, 200, 200), thickness=1)
             )
 
-        # --- THUẬT TOÁN TÍNH ĐIỂM ---
         if label == "Focused":
-            attention_score += 5.0 * dt   
-        elif label in ["Slouching", "Leaning on Desk"]:
-            attention_score -= 5.0 * dt   
-        elif label == "Looking Away":
-            attention_score -= 10.0 * dt  
-        elif label in ["Using Phone", "Absence"]:
-            attention_score -= 20.0 * dt  
+            attention_score += 2.0 * dt       # HỒI PHỤC CHẬM: Lên 2 điểm/giây
             
+        elif label == "Slouching":
+            attention_score -= 0.2 * dt       # PHẠT CỰC NHẸ: Mất 5 giây mới trừ 1 điểm. 
+                                              # Giúp dung túng cho việc AI phân vân với Focused.
+                                              
+        elif label == "Leaning on Desk":
+            attention_score -= 1.5 * dt       # PHẠT NHẸ: Trừ 1.5 điểm/giây
+            
+        elif label == "Looking Away":
+            attention_score -= 3.0 * dt       # PHẠT VỪA: Trừ 3 điểm/giây
+            
+        elif label in ["Using Phone", "Absence"]:
+            attention_score -= 8.0 * dt       # PHẠT NẶNG: Trừ 8 điểm/giây 
+                                              # (Mất khoảng 12.5 giây liên tục mới tụt từ 100 về 0)
+            
+        # Giới hạn điểm luôn nằm trong khoảng 0 -> 100
         attention_score = max(0.0, min(100.0, attention_score))
-
         # --- GIAO DIỆN (UI DASHBOARD) ---
         if attention_score > 80:
             ui_color = (0, 255, 0)      
