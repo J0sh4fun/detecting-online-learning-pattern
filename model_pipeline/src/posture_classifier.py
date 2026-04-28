@@ -39,7 +39,8 @@ class PostureClassifier:
         return False
 
     def get_landmark_px(self, landmark, w, h):
-        return (int(landmark.x * w), int(landmark.y * h))
+        # Match training convention (cv2.flip(frame, 1)): mirror x-coordinate.
+        return (int((1.0 - landmark.x) * w), int(landmark.y * h))
 
     def extract_features(self, landmarks, face_landmarks, w, h):
         """Trích xuất dữ liệu đặc trưng từ các điểm mốc (landmarks)"""
