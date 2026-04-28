@@ -31,24 +31,23 @@ def main():
     classifier = PostureClassifier()
     cap = cv2.VideoCapture(0)
 
-    # State variables
+    # Biến trạng thái
     is_collecting = False
     is_counting_down = False
     countdown_start_time = 0
     current_label = None
     
+    # Đã chỉnh sửa: Chỉ giữ lại 4 nhãn 0, 1, 2, 3
     label_map = {
         ord('0'): "Focused",
         ord('1'): "Slouching",
         ord('2'): "Leaning on Desk",
-        ord('3'): "Looking Away",
-        ord('4'): "Using Phone",
-        ord('5'): "Absence"
+        ord('3'): "Looking Away"
     }
 
-    # Restored Terminal Menu
+    # Đã chỉnh sửa: Cập nhật menu terminal
     print("=== DATA COLLECTOR (TOGGLE MODE) ===")
-    print("Phím 0: Focused | 1: Slouching | 2: Leaning | 3: Looking Away | 4: Using Phone | 5: Absence")
+    print("Phím 0: Focused | 1: Slouching | 2: Leaning | 3: Looking Away")
     print("Nhấn lại phím đó để dừng. Nhấn 'q' để thoát.")
 
     while True:
@@ -59,9 +58,8 @@ def main():
         h, w, _ = frame.shape
         image_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         
-        # --- RESTORED WINDOW MENU ---
-        # Putting the guide back at (10, 30) as requested
-        cv2.putText(frame, "0:Focus 1:Slouch 2:Lean 3:Away 4:Phone 5:Absence", (10, 30), 
+        # Đã chỉnh sửa: Cập nhật hướng dẫn trên cửa sổ (Window Menu)
+        cv2.putText(frame, "0:Focus 1:Slouch 2:Lean 3:Away", (10, 30), 
                     cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 1)
 
         results = pose.process(image_rgb)
@@ -82,7 +80,7 @@ def main():
                 is_counting_down = True
                 countdown_start_time = time.time()
 
-        # Countdown Logic
+        # Logic đếm ngược
         if is_counting_down:
             elapsed = time.time() - countdown_start_time
             remaining = 3 - int(elapsed)
@@ -93,7 +91,7 @@ def main():
                 is_counting_down = False
                 is_collecting = True
 
-        # Recording Logic
+        # Logic thu thập dữ liệu
         if is_collecting:
             data_to_save = None
             
@@ -114,14 +112,14 @@ def main():
                     int(has_phone),
                     current_label
                 ]
-            elif current_label == "Absence":
-                data_to_save = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0, 0, "Absence"]
+            
+            # Đã xóa phần kiểm tra "Absence" vì nhãn này không còn được sử dụng
 
             if data_to_save:
                 with open(CSV_FILE, mode='a', newline='') as f:
                     writer = csv.writer(f)
                     writer.writerow(data_to_save)
-                # Recording indicator
+                # Chỉ báo đang quay (Recording indicator)
                 cv2.rectangle(frame, (0, 0), (w, h), (0, 0, 255), 10)
                 cv2.putText(frame, f"REC: {current_label}", (10, h - 20), 
                             cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)

@@ -25,7 +25,7 @@ class PostureClassifier:
         except Exception as e:
             print(f"LỖI: Không tìm thấy tệp mô hình. Chi tiết: {e}")
 
-        # 4. Bộ đệm thời gian
+        # 4. Bộ đệm thời gian để làm mịn nhãn
         self.history_length = 15 
         self.label_history = deque(maxlen=self.history_length)
 
@@ -42,7 +42,7 @@ class PostureClassifier:
         return (int(landmark.x * w), int(landmark.y * h))
 
     def extract_features(self, landmarks, face_landmarks, w, h):
-        """Trích xuất dữ liệu thô đưa vào AI"""
+        """Trích xuất dữ liệu đặc trưng từ các điểm mốc (landmarks)"""
         nose = self.get_landmark_px(landmarks[self.mp_pose.PoseLandmark.NOSE.value], w, h)
         l_shoulder = self.get_landmark_px(landmarks[self.mp_pose.PoseLandmark.LEFT_SHOULDER.value], w, h)
         r_shoulder = self.get_landmark_px(landmarks[self.mp_pose.PoseLandmark.RIGHT_SHOULDER.value], w, h)
@@ -69,13 +69,11 @@ class PostureClassifier:
         chest_level = mid_shoulder[1] + (shoulder_width * 0.5)
         wrist_elevated = False
         min_hand_to_face = 999.0
-        min_hand_to_ear = 999.0
         
         for wrist_lm, wrist_px in [(landmarks[15], l_wrist), (landmarks[16], r_wrist)]:
             if wrist_lm.visibility > 0.2:
                 dist_face = min(calculate_distance(wrist_px, l_ear), calculate_distance(wrist_px, nose))
                 min_hand_to_face = min(min_hand_to_face, dist_face / shoulder_width)
-                min_hand_to_ear = min(min_hand_to_ear, calculate_distance(wrist_px, l_ear) / shoulder_width)
                 if wrist_px[1] < chest_level:
                     wrist_elevated = True
 
@@ -96,7 +94,7 @@ class PostureClassifier:
         }
 
     def _predict_ml(self, features, has_phone):
-        """Đưa dữ liệu vào Mô hình AI để dự đoán"""
+        """Dự đoán các tư thế khác bằng mô hình AI"""
         feature_vector = np.array([[
             features['neck_ratio'], 
             features['forward_lean_z'], 
@@ -114,20 +112,28 @@ class PostureClassifier:
         return prediction[0]
 
     def classify(self, features, landmarks, has_phone=False):
-        """Luồng xử lý chính: Kiểm tra vắng mặt -> Dự đoán AI -> Làm mịn"""
-        # 1. Kiểm tra vắng mặt bằng độ hiển thị
+        """
+        Luồng xử lý ưu tiên: 
+        1. Kiểm tra vắng mặt (Absence)
+        2. Ưu tiên kết quả YOLO (Using Phone)
+        3. Sử dụng mô hình AI cho các tư thế còn lại
+        """
+        # 1. Kiểm tra vắng mặt bằng độ hiển thị của MediaPipe
         visibility_nose = landmarks[self.mp_pose.PoseLandmark.NOSE.value].visibility
         visibility_l_shoulder = landmarks[self.mp_pose.PoseLandmark.LEFT_SHOULDER.value].visibility
         visibility_r_shoulder = landmarks[self.mp_pose.PoseLandmark.RIGHT_SHOULDER.value].visibility
         
         if visibility_nose < 0.3 and visibility_l_shoulder < 0.3 and visibility_r_shoulder < 0.3:
             raw_label = "Absence"
+        
+        # 2. ƯU TIÊN YOLO: Nếu YOLO thấy điện thoại, gán nhãn ngay lập tức
+        elif has_phone:
+            raw_label = "Using Phone"
+            
         else:
-            # 2. Dùng AI dự đoán (HOÀN TOÀN BỎ QUA CALIBRATE CŨ)
+            # 3. Dùng AI dự đoán các tư thế như Focused, Slouching, v.v.
             raw_label = self._predict_ml(features, has_phone)
             
-        # 3. Làm mịn kết quả
+        # Làm mịn kết quả bằng mode (nhãn xuất hiện nhiều nhất trong history)
         self.label_history.append(raw_label)
-        if len(self.label_history) == 0:
-            return raw_label
         return statistics.mode(self.label_history)
