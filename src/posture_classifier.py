@@ -127,7 +127,13 @@ class PostureClassifier:
             raw_label = "Absence"
         
         # 2. ƯU TIÊN YOLO: Nếu YOLO thấy điện thoại, gán nhãn ngay lập tức
-        elif has_phone:
+        wrist_visible = landmarks[self.mp_pose.PoseLandmark.LEFT_WRIST.value].visibility > 0.5 or \
+                        landmarks[self.mp_pose.PoseLandmark.RIGHT_WRIST.value].visibility > 0.5
+        
+        hand_near_ear = features['hand_to_face_ratio'] < 0.18
+        
+        # If YOLO detects the phone OR the gesture indicates calling/browsing
+        if has_phone or (hand_near_ear and wrist_visible):
             raw_label = "Using Phone"
             
         else:
