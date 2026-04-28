@@ -12,13 +12,13 @@ CSV_FILE = os.path.join(DATA_DIR, "posture_dataset.csv")
 # Tạo thư mục nếu chưa có
 os.makedirs(DATA_DIR, exist_ok=True)
 
-# Khởi tạo CSV và viết Header (Chỉ lưu các đặc trưng dạng SỐ)
+# Khởi tạo CSV và viết Header
 if not os.path.exists(CSV_FILE):
     with open(CSV_FILE, mode='w', newline='') as f:
         writer = csv.writer(f)
         writer.writerow([
             'neck_ratio', 'forward_lean_z', 'shoulder_tilt', 'head_tilt', 
-            'hand_to_face', 'hand_to_ear', 'pose_x', 'pose_y', 
+            'hand_to_face', 'pose_x', 'pose_y', 
             'wrist_elevated', 'has_phone', 'label'
         ])
 
@@ -50,49 +50,53 @@ def main():
 
         results = pose.process(image_rgb)
         mesh_results = face_mesh.process(image_rgb)
-        
-        # Dùng YOLO tìm điện thoại
         has_phone = classifier.detect_phone(frame)
+
+        # --- FIX: Move waitKey outside the IF block so the window never freezes ---
+        key = cv2.waitKey(1) & 0xFF
+        label = None
+        
+        if key == ord('0'): label = "Focused"
+        elif key == ord('1'): label = "Slouching"
+        elif key == ord('2'): label = "Leaning on Desk"
+        elif key == ord('3'): label = "Looking Away"
+        elif key == ord('4'): label = "Using Phone"
+        elif key == ord('5'): label = "Absence"
+        elif key == ord('q'): break
+
+        # Prepare feature values
+        data_to_save = None
 
         if results.pose_landmarks:
             landmarks = results.pose_landmarks.landmark
             face_landmarks = mesh_results.multi_face_landmarks[0] if mesh_results.multi_face_landmarks else None
-            
-            # TRÍCH XUẤT ĐẶC TRƯNG TỪ TUẦN 2
             features = classifier.extract_features(landmarks, face_landmarks, w, h)
             
-            # Lắng nghe bàn phím
-            key = cv2.waitKey(1) & 0xFF
-            label = None
-            
-            if key == ord('0'): label = "Focused"
-            elif key == ord('1'): label = "Slouching"
-            elif key == ord('2'): label = "Leaning on Desk"
-            elif key == ord('3'): label = "Looking Away"
-            elif key == ord('4'): label = "Using Phone"
-            elif key == ord('5'): label = "Absence"
-            elif key == ord('q'): break
-                
-            # Lưu vào CSV
             if label:
-                with open(CSV_FILE, mode='a', newline='') as f:
-                    writer = csv.writer(f)
-                    writer.writerow([
-                        round(features['neck_ratio'], 4),
-                        round(features['forward_lean_z'], 4),
-                        round(features['shoulder_tilt_ratio'], 4),
-                        round(features['head_tilt_ratio'], 4),
-                        round(features['hand_to_face_ratio'], 4),
-                        round(features['hand_to_ear_ratio'], 4),
-                        round(features['pose_x'], 4),  # Pitch
-                        round(features['pose_y'], 4),  # Yaw
-                        int(features['wrist_elevated']), # Chuyển Boolean -> 0/1
-                        int(has_phone),                  # Chuyển Boolean -> 0/1
-                        label
-                    ])
-                print(f" Đã lưu mẫu: {label}")
-                # Hiệu ứng chớp màn hình khi lưu
-                cv2.rectangle(frame, (0, 0), (w, h), (0, 255, 0), 10) 
+                data_to_save = [
+                    round(features['neck_ratio'], 4),
+                    round(features['forward_lean_z'], 4),
+                    round(features['shoulder_tilt_ratio'], 4),
+                    round(features['head_tilt_ratio'], 4),
+                    round(features['hand_to_face_ratio'], 4),
+                    round(features['pose_x'], 4),
+                    round(features['pose_y'], 4),
+                    int(features['wrist_elevated']),
+                    int(has_phone),
+                    label
+                ]
+        
+        # --- Handle Absence label specifically when landmarks are NOT found ---
+        elif label == "Absence":
+            data_to_save = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0, 0, "Absence"]
+
+        # Save to CSV if we have a valid label and data
+        if data_to_save:
+            with open(CSV_FILE, mode='a', newline='') as f:
+                writer = csv.writer(f)
+                writer.writerow(data_to_save)
+            print(f" Đã lưu mẫu: {data_to_save[-1]}")
+            cv2.rectangle(frame, (0, 0), (w, h), (0, 255, 0), 10) 
 
         cv2.imshow('Data Collector', frame)
 

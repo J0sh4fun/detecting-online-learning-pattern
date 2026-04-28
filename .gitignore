@@ -10,7 +10,7 @@ __pycache__/
 *$py.class
 
 # Data and Models (Ignore large files to save Git LFS quota)
-data/
+
 models/
 *.csv
 *.pkl
