@@ -14,9 +14,9 @@ class PostureClassifier:
         self.mp_face_mesh = mp.solutions.face_mesh
         
         # 2. Khởi tạo YOLO (Tăng Thresh lên 0.55 để không nhận nhầm bàn phím)
-        self.yolo_model = YOLO('yolov8s.pt')
+        self.yolo_model = YOLO('yolo26s.pt')
         self.CELL_PHONE_CLASS_ID = 67 
-        self.THRESH_PHONE_CONF = 0.55    
+        self.THRESH_PHONE_CONF = 0.3
         
         # 3. TẢI BỘ NÃO AI (Mô hình và Scaler)
         try:
