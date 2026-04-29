@@ -1,63 +1,105 @@
-import { BrowserRouter as Router, Routes, Route, useNavigate, useParams } from 'react-router-dom';
-import { useState } from 'react';
-import './index.css';
+import { useMemo, useState } from 'react';
+import { BrowserRouter as Router, Route, Routes, useNavigate, useSearchParams } from 'react-router-dom';
 import TeacherDashboard from './pages/TeacherDashboard';
 import StudentRoom from './pages/StudentRoom';
+import { createRoom, joinRoom } from './lib/api';
+import { saveSession } from './lib/sessionStore';
+import './index.css';
 
 function Home() {
-  const [role, setRole] = useState('student');
-  const [roomId, setRoomId] = useState('');
-  const [studentId, setStudentId] = useState('');
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const [loading, setLoading] = useState(false);
+  const [teacherId, setTeacherId] = useState('');
+  const [roomName, setRoomName] = useState('Focus Monitoring Class');
+  const [roomCode, setRoomCode] = useState(searchParams.get('join') || '');
+  const [studentId, setStudentId] = useState('');
+  const [error, setError] = useState('');
 
-  const handleJoin = (e) => {
-    e.preventDefault();
-    if (role === 'teacher') {
-      const newRoom = Math.random().toString(36).substring(2, 8).toUpperCase();
-      navigate(`/teacher/${newRoom}`);
-    } else {
-      if (!roomId || !studentId) return alert('Room ID and Student ID are required');
-      navigate(`/student/${roomId}/${studentId}`);
+  const inviteMode = useMemo(() => Boolean(searchParams.get('join')), [searchParams]);
+
+  async function handleCreateRoom(event) {
+    event.preventDefault();
+    setLoading(true);
+    setError('');
+    try {
+      const session = await createRoom({ teacherId: teacherId.trim(), roomName: roomName.trim() });
+      saveSession('teacher', session);
+      navigate(`/teacher/${session.room_code}`, { state: { session } });
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
     }
-  };
+  }
+
+  async function handleJoinRoom(event) {
+    event.preventDefault();
+    setLoading(true);
+    setError('');
+    try {
+      const session = await joinRoom({ roomCode: roomCode.trim().toUpperCase(), studentId: studentId.trim() });
+      saveSession('student', { ...session, student_id: studentId.trim() });
+      navigate(`/student/${session.room_code}/${encodeURIComponent(studentId.trim())}`, {
+        state: { session: { ...session, student_id: studentId.trim() } },
+      });
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  }
 
   return (
-    <div className="home-container">
-      <div className="glass-card zoom-in">
-        <h1 className="gradient-text">Focus AI Room</h1>
-        <p className="subtitle">Real-time attention tracking powered by AI</p>
+    <main className="home-layout">
+      <section className="panel">
+        <h1>AI Focus Classroom</h1>
+        <p className="muted">LiveKit SFU + Worker ONNX scoring + anti-cheat verification</p>
+        {error && <p className="error-text">{error}</p>}
+      </section>
 
-        <form onSubmit={handleJoin} className="join-form">
-          <div className="role-selector">
-            <button 
-              type="button"
-              className={role === 'student' ? 'active' : ''} 
-              onClick={() => setRole('student')}
-            >Student</button>
-            <button 
-              type="button"
-              className={role === 'teacher' ? 'active' : ''} 
-              onClick={() => setRole('teacher')}
-            >Teacher</button>
-          </div>
+      <section className="forms-layout">
+        <form className="panel form-panel" onSubmit={handleCreateRoom}>
+          <h2>Teacher</h2>
+          <input
+            value={teacherId}
+            onChange={(event) => setTeacherId(event.target.value)}
+            placeholder="Teacher ID"
+            required
+          />
+          <input
+            value={roomName}
+            onChange={(event) => setRoomName(event.target.value)}
+            placeholder="Room name"
+            required
+          />
+          <button disabled={loading} type="submit">Create classroom</button>
+        </form>
 
-          {role === 'student' && (
-            <>
-              <input type="text" placeholder="Room ID" value={roomId} onChange={e => setRoomId(e.target.value)} required />
-              <input type="text" placeholder="Your Name" value={studentId} onChange={e => setStudentId(e.target.value)} required />
-            </>
-          )}
-
-          <button type="submit" className="primary-btn pulse-glow">
-            {role === 'teacher' ? 'Create New Session' : 'Join Session'}
+        <form className="panel form-panel" onSubmit={handleJoinRoom}>
+          <h2>Student</h2>
+          <input
+            value={roomCode}
+            onChange={(event) => setRoomCode(event.target.value.toUpperCase())}
+            placeholder="Room code"
+            required
+          />
+          <input
+            value={studentId}
+            onChange={(event) => setStudentId(event.target.value)}
+            placeholder="Student ID"
+            required
+          />
+          <button disabled={loading} type="submit">
+            {inviteMode ? 'Join invited room' : 'Join classroom'}
           </button>
         </form>
-      </div>
-    </div>
+      </section>
+    </main>
   );
 }
 
-function App() {
+export default function App() {
   return (
     <Router>
       <Routes>
@@ -69,4 +111,3 @@ function App() {
   );
 }
 
-export default App;

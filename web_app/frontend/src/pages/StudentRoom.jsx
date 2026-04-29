@@ -1,218 +1,161 @@
-import { useEffect, useRef, useState } from 'react';
-import { useParams } from 'react-router-dom';
-import { FilesetResolver, PoseLandmarker, FaceLandmarker } from '@mediapipe/tasks-vision';
-import { extractFeatures } from '../utils/engine';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { useLocation, useNavigate, useParams } from 'react-router-dom';
+import { LiveKitRoom, TrackLoop, VideoTrack, useLocalParticipant, useTracks } from '@livekit/components-react';
+import { Track } from 'livekit-client';
+import '@livekit/components-styles';
+import { verifyFrame } from '../lib/api';
+import { getSession } from '../lib/sessionStore';
+
+function StudentAiPipeline({ session, roomId, studentId, setError }) {
+  const { localParticipant } = useLocalParticipant();
+  const workerRef = useRef(null);
+  const wsRef = useRef(null);
+  const hiddenVideoRef = useRef(null);
+  const captureTimerRef = useRef(null);
+
+  useEffect(() => {
+    let disposed = false;
+    const worker = new Worker(new URL('../workers/aiWorker.js', import.meta.url), { type: 'module' });
+    workerRef.current = worker;
+    worker.postMessage({
+      type: 'init',
+      modelUrl: import.meta.env.VITE_POSTURE_MODEL_URL || '/models/best_posture_model.onnx',
+      targetFps: 1,
+      flushIntervalMs: 4000,
+    });
+
+    worker.onmessage = async (event) => {
+      const payload = event.data;
+      if (payload.type === 'aggregate' && wsRef.current?.readyState === WebSocket.OPEN) {
+        wsRef.current.send(JSON.stringify({
+          token: session.session_token,
+          average_score: payload.averageScore,
+          status: payload.status,
+          camera_on: payload.cameraOn,
+          sampled_fps: payload.fps,
+          sample_count: payload.sampleCount,
+          client_sent_at: Date.now() / 1000,
+        }));
+      }
+
+      if (payload.type === 'verify_frame') {
+        try {
+          await verifyFrame({
+            token: session.session_token,
+            roomCode: roomId,
+            studentId,
+            clientScore: payload.clientScore,
+            frameBase64: payload.frameBase64,
+          });
+        } catch (err) {
+          setError(`Verification failed: ${err.message}`);
+        }
+      }
+    };
+
+    const wsBase = (import.meta.env.VITE_API_WS_BASE || 'ws://localhost:8000').replace(/\/$/, '');
+    wsRef.current = new WebSocket(`${wsBase}/ws/student/${roomId}/${encodeURIComponent(studentId)}`);
+    wsRef.current.onerror = () => {
+      if (!disposed) {
+        setError(`Score WebSocket disconnected (${wsBase})`);
+      }
+    };
+    wsRef.current.onclose = () => {
+      if (!disposed) {
+        setError(`Score stream closed (${wsBase})`);
+      }
+    };
+
+    return () => {
+      disposed = true;
+      if (captureTimerRef.current) {
+        window.clearInterval(captureTimerRef.current);
+      }
+      if (wsRef.current && (wsRef.current.readyState === WebSocket.OPEN || wsRef.current.readyState === WebSocket.CONNECTING)) {
+        wsRef.current.close();
+      }
+      worker.terminate();
+    };
+  }, [roomId, session.session_token, setError, studentId]);
+
+  useEffect(() => {
+    const publication = localParticipant.getTrackPublication(Track.Source.Camera);
+    const mediaStreamTrack = publication?.track?.mediaStreamTrack;
+    const video = hiddenVideoRef.current;
+    if (!video || !mediaStreamTrack) return;
+
+    const stream = new MediaStream([mediaStreamTrack]);
+    video.srcObject = stream;
+    video.play().catch(() => undefined);
+
+    if (captureTimerRef.current) window.clearInterval(captureTimerRef.current);
+    captureTimerRef.current = window.setInterval(async () => {
+      if (!workerRef.current || !video.videoWidth || !video.videoHeight) {
+        return;
+      }
+      const frame = await createImageBitmap(video);
+      workerRef.current.postMessage({ type: 'frame', frame, timestamp: Date.now() }, [frame]);
+    }, 1000);
+  }, [localParticipant]);
+
+  return <video ref={hiddenVideoRef} muted playsInline style={{ display: 'none' }} />;
+}
+
+function StudentVideoGrid() {
+  const tracks = useTracks([{ source: Track.Source.Camera, withPlaceholder: true }], { onlySubscribed: false });
+  return (
+    <section className="student-grid">
+      <TrackLoop tracks={tracks}>
+        {(trackRef) => (
+          <article key={`${trackRef.participant.identity}-${trackRef.source || 'camera'}`} className="student-view">
+            <header>{trackRef.participant.identity}</header>
+            <VideoTrack trackRef={trackRef} />
+          </article>
+        )}
+      </TrackLoop>
+    </section>
+  );
+}
 
 export default function StudentRoom() {
   const { roomId, studentId } = useParams();
-  const videoRef = useRef(null);
-  const canvasRef = useRef(null);
-  const wsRef = useRef(null);
-  
-  const [status, setStatus] = useState('Initializing Models...');
-  const [currentScore, setCurrentScore] = useState(100);
-  const [currentLabel, setCurrentLabel] = useState('Waiting');
-  
-  const lastTimeRef = useRef(performance.now());
-  const processingIntervalRef = useRef(null);
-  const reconnectTimeoutRef = useRef(null);
+  const navigate = useNavigate();
+  const location = useLocation();
+  const [error, setError] = useState('');
+  const session = useMemo(() => location.state?.session || getSession('student'), [location.state?.session]);
 
-  useEffect(() => {
-    let active = true;
-    let poseLandmarker, faceLandmarker;
-
-    const initializeModels = async () => {
-      try {
-        const vision = await FilesetResolver.forVisionTasks(
-          "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3/wasm"
-        );
-        
-        poseLandmarker = await PoseLandmarker.createFromOptions(vision, {
-          baseOptions: {
-            modelAssetPath: "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task",
-            delegate: "GPU"
-          },
-          runningMode: "VIDEO",
-          numPoses: 1
-        });
-
-        faceLandmarker = await FaceLandmarker.createFromOptions(vision, {
-          baseOptions: {
-            modelAssetPath: "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task",
-            delegate: "GPU"
-          },
-          runningMode: "VIDEO",
-          numFaces: 1
-        });
-
-        setStatus('Connecting to Camera...');
-        
-        const stream = await navigator.mediaDevices.getUserMedia({ 
-          video: { width: 640, height: 480 } 
-        });
-        
-        if (videoRef.current) {
-          videoRef.current.srcObject = stream;
-          videoRef.current.onloadedmetadata = () => {
-            videoRef.current.play();
-            setStatus('Connecting to Session...');
-            connectWebSocket();
-          };
-        }
-      } catch (err) {
-        setStatus(`Error: ${err.message}`);
-      }
-    };
-
-    const connectWebSocket = () => {
-      if (!active) return;
-      wsRef.current = new WebSocket(`ws://localhost:8000/ws/student/${roomId}/${studentId}`);
-      
-      wsRef.current.onopen = () => {
-        setStatus('Connected. Tracking Active.');
-        lastTimeRef.current = performance.now();
-        if (!processingIntervalRef.current) {
-          processingIntervalRef.current = window.setInterval(processFrame, 1000);
-        }
-      };
-
-      wsRef.current.onmessage = (event) => {
-        const data = JSON.parse(event.data);
-        if (data.score !== undefined) {
-          setCurrentScore(data.score);
-          setCurrentLabel(data.label);
-        }
-      };
-
-      wsRef.current.onclose = () => {
-        if (!active) return;
-        setStatus('Disconnected. Reconnecting...');
-        if (reconnectTimeoutRef.current) {
-          window.clearTimeout(reconnectTimeoutRef.current);
-        }
-        reconnectTimeoutRef.current = window.setTimeout(() => {
-          connectWebSocket();
-        }, 1000);
-      };
-    };
-
-    const processFrame = () => {
-      if (!active || !videoRef.current || !poseLandmarker || !faceLandmarker) return;
-
-      const ws = wsRef.current;
-      if (!ws || ws.readyState !== WebSocket.OPEN) return;
-      
-      const v = videoRef.current;
-      if (!v.videoWidth || !v.videoHeight) return;
-
-      try {
-        const poseResults = poseLandmarker.detectForVideo(v, performance.now());
-        const faceResults = faceLandmarker.detectForVideo(v, performance.now());
-        
-        let features = null;
-        let isAbsent = true;
-        let hasPhone = false;
-
-        const w = v.videoWidth;
-        const h = v.videoHeight;
-
-        if (poseResults.landmarks && poseResults.landmarks.length > 0) {
-          // If pose landmarks are detected, the student is present.
-          isAbsent = false;
-          const pLms = poseResults.landmarks[0];
-          const fLms = (faceResults.faceLandmarks && faceResults.faceLandmarks.length > 0) ? faceResults.faceLandmarks[0] : [];
-          
-          // Apply anti-tampering by obfuscating the payload feature formatting
-          features = extractFeatures(pLms, fLms, w, h);
-          
-          const vis = features.visibility || {};
-
-          // Phone detection heuristic logic
-          const wristVisible = (vis.l_wrist ?? 0) > 0.5 || (vis.r_wrist ?? 0) > 0.5;
-          const handNearEar = features.hand_to_face_ratio < 0.18;
-          if (handNearEar && wristVisible) {
-            hasPhone = true;
-          }
-        }
-
-        const now = performance.now();
-        const dt = (now - lastTimeRef.current) / 1000.0;
-        lastTimeRef.current = now;
-
-        // In a real prod environment, calculate crypto nonce hash here for anti-tampering verification
-        const rawFeatures = features ? [
-            features.neck_ratio, features.forward_lean_z, features.shoulder_tilt_ratio,
-            features.head_tilt_ratio, features.hand_to_face_ratio, features.pose_x,
-            features.pose_y, features.wrist_elevated ? 1 : 0, hasPhone ? 1 : 0
-          ] : null;
-        const safeFeatures = rawFeatures ? rawFeatures.map((value) => {
-          const n = Number(value);
-          return Number.isFinite(n) ? n : 0;
-        }) : null;
-
-        const payload = {
-          features: safeFeatures,
-          has_phone: hasPhone,
-          is_absent: isAbsent,
-          dt: dt
-        };
-        
-        if (ws.readyState === WebSocket.OPEN) {
-          ws.send(JSON.stringify(payload));
-        }
-
-        // Draw debug overlay
-        if (canvasRef.current) {
-          const ctx = canvasRef.current.getContext('2d');
-          ctx.clearRect(0,0, w, h);
-          if (features) {
-            ctx.fillStyle = 'lime';
-            ctx.beginPath();
-            ctx.arc(features.pose_x * w + w/2, h/2, 5, 0, 2*Math.PI);
-            ctx.fill();
-          }
-        }
-      } catch (err) {
-        // Keep interval alive even if one inference frame fails.
-        console.error('Frame processing failed:', err);
-      }
-    };
-
-    initializeModels();
-
-    return () => {
-      active = false;
-      if (processingIntervalRef.current) {
-        window.clearInterval(processingIntervalRef.current);
-        processingIntervalRef.current = null;
-      }
-      if (reconnectTimeoutRef.current) {
-        window.clearTimeout(reconnectTimeoutRef.current);
-        reconnectTimeoutRef.current = null;
-      }
-      if (wsRef.current) wsRef.current.close();
-      if (videoRef.current && videoRef.current.srcObject) {
-        videoRef.current.srcObject.getTracks().forEach(t => t.stop());
-      }
-    };
-  }, [roomId, studentId]);
-
-  const getScoreColor = (sc) => {
-    if (sc > 80) return '#00ff6a';
-    if (sc > 50) return '#ffd000';
-    return '#ff3737';
-  };
+  if (!session) {
+    return (
+      <main className="screen-center">
+        <p>Session expired. Please join the classroom again.</p>
+        <button onClick={() => navigate('/')}>Back home</button>
+      </main>
+    );
+  }
 
   return (
-    <div className="student-container">
-      <div className="status-banner" style={{ background: getScoreColor(currentScore) + '33', borderBottom: `2px solid ${getScoreColor(currentScore)}`}}>
-        Status: <strong>{status}</strong> | Room: <strong>{roomId}</strong>
-      </div>
-      
-      <div className="video-wrapper slide-up">
-        <video ref={videoRef} className="camera-feed" playsInline muted />
-        <canvas ref={canvasRef} className="camera-overlay" width={640} height={480} />
-      </div>
-    </div>
+    <main className="student-layout">
+      <header className="panel">
+        <h1>Classroom {roomId}</h1>
+        <p className="muted">
+          Connected as <strong>{studentId}</strong>. AI processing runs in the background.
+        </p>
+        {error && <p className="error-text">{error}</p>}
+      </header>
+
+      <LiveKitRoom
+        token={session.livekit_token}
+        serverUrl={session.livekit_url}
+        connect
+        video
+        audio={false}
+        onError={() => setError(`LiveKit connection failed: ${session.livekit_url}`)}
+        className="room-shell"
+      >
+        <StudentAiPipeline session={session} roomId={roomId} studentId={studentId} setError={setError} />
+        <StudentVideoGrid />
+      </LiveKitRoom>
+    </main>
   );
 }
+
