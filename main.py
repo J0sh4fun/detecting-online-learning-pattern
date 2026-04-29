@@ -68,7 +68,7 @@ def main():
             attention_score -= 1.5 * dt       # PHẠT NHẸ: Trừ 1.5 điểm/giây
             
         elif label == "Looking Away":
-            attention_score -= 3.0 * dt       # PHẠT VỪA: Trừ 3 điểm/giây
+            attention_score -= 0.5 * dt       # PHẠT VỪA: Trừ 3 điểm/giây
             
         elif label in ["Using Phone", "Absence"]:
             attention_score -= 8.0 * dt       # PHẠT NẶNG: Trừ 8 điểm/giây 
