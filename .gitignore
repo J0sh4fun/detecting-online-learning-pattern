@@ -11,9 +11,7 @@ __pycache__/
 
 # Data and Models (Ignore large files to save Git LFS quota)
 
-models/
-*.csv
-*.pkl
+
 *.h5
 yolov26s.pt
 

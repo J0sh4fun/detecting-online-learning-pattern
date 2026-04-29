@@ -65,10 +65,11 @@ def estimate_head_pose(face_landmarks, frame_width, frame_height):
     left_eye = face_landmarks.landmark[33]
     right_eye = face_landmarks.landmark[263]
 
-    # Convert to Pixel coordinates (Note: the Z-axis of MediaPipe is scaled horizontally)
-    lx, ly, lz = left_eye.x * frame_width, left_eye.y * frame_height, left_eye.z * frame_width
-    rx, ry, rz = right_eye.x * frame_width, right_eye.y * frame_height, right_eye.z * frame_width
-    nx, ny, nz = nose.x * frame_width, nose.y * frame_height, nose.z * frame_width
+    # Convert to pixel coordinates with horizontal flip to match training
+    # frames that were mirrored via cv2.flip(frame, 1).
+    lx, ly, lz = (1.0 - left_eye.x) * frame_width, left_eye.y * frame_height, left_eye.z * frame_width
+    rx, ry, rz = (1.0 - right_eye.x) * frame_width, right_eye.y * frame_height, right_eye.z * frame_width
+    nx, ny, nz = (1.0 - nose.x) * frame_width, nose.y * frame_height, nose.z * frame_width
 
     # 1. Calculate the YAW (Left/Right Rotation) along the X and Z axes of both eyes.
     dx = rx - lx
