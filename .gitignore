@@ -1,24 +1,46 @@
-# Environments
+# Environment files
 .env
-.venv
+.env.*
+!.env.example
+!.env.*.example
+
+# Virtual environments
+.venv/
 venv/
 env/
 
-# Byte-compiled / optimized / DLL files
+# Python cache/build
 __pycache__/
 *.py[cod]
 *$py.class
+.pytest_cache/
+.mypy_cache/
 
-# Data and Models (Ignore large files to save Git LFS quota)
+# Node artifacts
+**/node_modules/
+**/dist/
+**/dist-ssr/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+*.log
 
-
+# Model artifacts / large files
 *.h5
-model_pipeline\yolo*.pt
+*.onnx
+yolo26s.pt
+yolov8s.pt
+
+# Runtime/generated app files
+web_app/frontend/public/models/
+web_app/backend/.env
+web_app/frontend/.env
 
 # OS generated files
 .DS_Store
 Thumbs.db
 
-# VS Code / IDE settings
+# IDE settings
 .vscode/
 .idea/
