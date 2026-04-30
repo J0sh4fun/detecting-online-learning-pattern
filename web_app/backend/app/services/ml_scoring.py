@@ -129,6 +129,7 @@ class VerificationScorer:
     def _label_to_score(label: str) -> float:
         map_value = {
             "Focused": 95.0,
+            "Slouched": 70.0,
             "Slouching": 70.0,
             "Looking Away": 62.0,
             "Leaning on Desk": 45.0,
@@ -137,6 +138,12 @@ class VerificationScorer:
         }
         return map_value.get(label, 55.0)
 
+    @staticmethod
+    def _display_label(label: str) -> str:
+        if label == "Slouching":
+            return "Slouched"
+        return label
+
     def score_frame(self, frame: np.ndarray) -> VerificationResult:
         features = self._extract_features(frame)
         if not features:
@@ -144,7 +151,7 @@ class VerificationScorer:
 
         scaled = self.scaler.transform(np.array([features], dtype=np.float64))
         label = str(self.classifier.predict(scaled)[0])
-        return VerificationResult(score=self._label_to_score(label), status=label)
+        return VerificationResult(score=self._label_to_score(label), status=self._display_label(label))
 
 
 _verification_scorer_instance = None

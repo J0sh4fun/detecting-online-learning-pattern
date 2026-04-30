@@ -15,6 +15,8 @@ from app.models.schemas import (
     JoinRoomRequest,
     RoomConnectionResponse,
     RoomReportResponse,
+    ScoreFrameRequest,
+    ScoreFrameResponse,
     StudentReport,
     StudentScoreIngest,
     StudentTimelinePoint,
@@ -229,7 +231,10 @@ def verify_frame(payload: VerifyFrameRequest) -> VerifyFrameResponse:
     except Exception as exc:
         raise HTTPException(status_code=400, detail="Invalid frame payload") from exc
 
-    server = get_verification_scorer().score_frame(frame)
+    try:
+        server = get_verification_scorer().score_frame(frame)
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=f"Scoring model unavailable: {exc}") from exc
     discrepancy = abs(server.score - payload.client_score)
     is_flagged = discrepancy >= settings.verify_discrepancy_threshold
 
@@ -253,6 +258,29 @@ def verify_frame(payload: VerifyFrameRequest) -> VerifyFrameResponse:
         server_status=server.status,
         reason="Large score discrepancy detected" if is_flagged else "Within threshold",
     )
+
+
+@app.post("/api/score/frame", response_model=ScoreFrameResponse)
+def score_frame(payload: ScoreFrameRequest) -> ScoreFrameResponse:
+    claims = decode_session_token(payload.token)
+    room_code = payload.room_code.strip().upper()
+    if claims.get("role") != "student":
+        raise HTTPException(status_code=403, detail="Only student tokens can score frame")
+    if claims.get("room_code") != room_code:
+        raise HTTPException(status_code=403, detail="Token room mismatch")
+    if claims.get("participant_id") != f"student-{payload.student_id.strip()}":
+        raise HTTPException(status_code=403, detail="Token participant mismatch")
+
+    try:
+        frame = _decode_image(payload.frame_base64)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="Invalid frame payload") from exc
+
+    try:
+        result = get_verification_scorer().score_frame(frame)
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=f"Scoring model unavailable: {exc}") from exc
+    return ScoreFrameResponse(score=result.score, status=result.status)
 
 
 @app.post("/api/rooms/{room_code}/end", response_model=RoomReportResponse)

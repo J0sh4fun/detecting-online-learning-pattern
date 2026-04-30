@@ -1,66 +1,224 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
-import { LiveKitRoom, TrackLoop, VideoTrack, useTracks } from '@livekit/components-react';
-import { Track } from 'livekit-client';
+import { LiveKitRoom, useRoomContext } from '@livekit/components-react';
+import { RoomEvent, Track } from 'livekit-client';
 import '@livekit/components-styles';
 import { endRoom } from '../lib/api';
 import { getSession } from '../lib/sessionStore';
 
 const PAGE_SIZE = 16;
 
+function formatUpdateAge(value, now) {
+  if (!value) return 'No update';
+  const updatedAt = new Date(value).getTime();
+  if (!Number.isFinite(updatedAt)) return 'No update';
+  const seconds = Math.max(0, Math.round((now - updatedAt) / 1000));
+  if (seconds < 2) return 'Just now';
+  if (seconds < 60) return `${seconds}s ago`;
+  return `${Math.floor(seconds / 60)}m ago`;
+}
+
 function getStudentIdentity(identity = '') {
   return identity.startsWith('student-') ? identity.slice('student-'.length) : identity;
 }
 
-function TeacherVideoGrid({ snapshots }) {
-  const [page, setPage] = useState(0);
-  const tracks = useTracks([{ source: Track.Source.Camera, withPlaceholder: true }], { onlySubscribed: false });
-  const studentTracks = useMemo(
-    () => tracks.filter((trackRef) => getStudentIdentity(trackRef.participant.identity) !== trackRef.participant.identity),
-    [tracks]
-  );
+function getCameraTrackItems(room, { includeLocal = true, participantFilter = () => true } = {}) {
+  const participants = [
+    ...(includeLocal ? [room.localParticipant] : []),
+    ...Array.from(room.remoteParticipants.values()),
+  ];
 
-  const totalPages = Math.max(1, Math.ceil(studentTracks.length / PAGE_SIZE));
-  const pagedTracks = studentTracks.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
+  return participants.flatMap((participant) => (
+    Array.from(participant.trackPublications.values())
+      .filter((publication) => publication.source === Track.Source.Camera && publication.track && participantFilter(participant))
+      .map((publication) => ({
+        id: publication.trackSid || publication.sid || `${participant.identity}-${publication.trackName || 'camera'}`,
+        participant,
+        publication,
+        track: publication.track,
+      }))
+  ));
+}
+
+function useCameraTrackItems(options) {
+  const room = useRoomContext();
+  const [items, setItems] = useState(() => getCameraTrackItems(room, options));
 
   useEffect(() => {
-    if (page >= totalPages) {
-      setPage(Math.max(0, totalPages - 1));
+    const refresh = () => {
+      for (const participant of room.remoteParticipants.values()) {
+        for (const publication of participant.trackPublications.values()) {
+          if (publication.source === Track.Source.Camera && !publication.track && typeof publication.setSubscribed === 'function') {
+            publication.setSubscribed(true);
+          }
+        }
+      }
+      setItems(getCameraTrackItems(room, options));
+    };
+
+    refresh();
+    room
+      .on(RoomEvent.ParticipantConnected, refresh)
+      .on(RoomEvent.ParticipantDisconnected, refresh)
+      .on(RoomEvent.TrackPublished, refresh)
+      .on(RoomEvent.TrackUnpublished, refresh)
+      .on(RoomEvent.TrackSubscribed, refresh)
+      .on(RoomEvent.TrackUnsubscribed, refresh)
+      .on(RoomEvent.LocalTrackPublished, refresh)
+      .on(RoomEvent.LocalTrackUnpublished, refresh)
+      .on(RoomEvent.ConnectionStateChanged, refresh);
+
+    return () => {
+      room
+        .off(RoomEvent.ParticipantConnected, refresh)
+        .off(RoomEvent.ParticipantDisconnected, refresh)
+        .off(RoomEvent.TrackPublished, refresh)
+        .off(RoomEvent.TrackUnpublished, refresh)
+        .off(RoomEvent.TrackSubscribed, refresh)
+        .off(RoomEvent.TrackUnsubscribed, refresh)
+        .off(RoomEvent.LocalTrackPublished, refresh)
+        .off(RoomEvent.LocalTrackUnpublished, refresh)
+        .off(RoomEvent.ConnectionStateChanged, refresh);
+    };
+  }, [room, options]);
+
+  return items;
+}
+
+function AttachedVideo({ track }) {
+  const videoRef = useRef(null);
+
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video || !track) return undefined;
+
+    track.attach(video);
+    video.play().catch(() => undefined);
+
+    return () => {
+      track.detach(video);
+    };
+  }, [track]);
+
+  return <video ref={videoRef} muted playsInline />;
+}
+
+function TeacherStatusTable({ students }) {
+  const [now, setNow] = useState(() => Date.now());
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  return (
+    <section className="status-panel">
+      <table className="status-table">
+        <thead>
+          <tr>
+            <th>Student</th>
+            <th>Status</th>
+            <th>Focus score</th>
+            <th>Camera</th>
+            <th>Updated</th>
+          </tr>
+        </thead>
+        <tbody>
+          {students.length === 0 ? (
+            <tr>
+              <td colSpan="5" className="empty-cell">Waiting for students...</td>
+            </tr>
+          ) : (
+            students.map((student) => (
+              <tr key={student.studentId}>
+                <td>{student.studentId}</td>
+                <td>{student.status}</td>
+                <td>{student.score}</td>
+                <td>{student.camera}</td>
+                <td>{formatUpdateAge(student.lastUpdate, now)}</td>
+              </tr>
+            ))
+          )}
+        </tbody>
+      </table>
+    </section>
+  );
+}
+
+function TeacherVideoGrid({ snapshots }) {
+  const [page, setPage] = useState(0);
+  const cameraOptions = useMemo(() => ({
+    includeLocal: false,
+    participantFilter: (participant) => getStudentIdentity(participant.identity) !== participant.identity,
+  }), []);
+  const studentTracks = useCameraTrackItems(cameraOptions);
+  const students = useMemo(() => {
+    const byStudentId = new Map();
+
+    for (const { participant } of studentTracks) {
+      const studentId = getStudentIdentity(participant.identity);
+      byStudentId.set(studentId, {
+        studentId,
+        status: 'Waiting...',
+        score: 'No data',
+        camera: 'On',
+        lastUpdate: null,
+      });
     }
-  }, [page, totalPages]);
+
+    for (const [studentId, score] of Object.entries(snapshots)) {
+      byStudentId.set(studentId, {
+        studentId,
+        status: score?.status || 'Waiting...',
+        score: score ? `${Math.round(score.score)}/100` : 'No data',
+        camera: score?.camera_on ? 'On' : 'Off',
+        lastUpdate: score?.last_update || null,
+      });
+    }
+
+    return Array.from(byStudentId.values()).sort((a, b) => a.studentId.localeCompare(b.studentId));
+  }, [snapshots, studentTracks]);
+
+  const totalPages = Math.max(1, Math.ceil(studentTracks.length / PAGE_SIZE));
+  const currentPage = Math.min(page, totalPages - 1);
+  const pagedTracks = studentTracks.slice(currentPage * PAGE_SIZE, (currentPage + 1) * PAGE_SIZE);
 
   return (
     <>
+      <TeacherStatusTable students={students} />
+
       <div className="grid-toolbar">
         <span>{studentTracks.length} camera streams</span>
         <div className="pager">
-          <button onClick={() => setPage((prev) => Math.max(0, prev - 1))} disabled={page === 0}>Prev</button>
-          <span>{page + 1} / {totalPages}</span>
-          <button onClick={() => setPage((prev) => Math.min(totalPages - 1, prev + 1))} disabled={page + 1 >= totalPages}>Next</button>
+          <button onClick={() => setPage(Math.max(0, currentPage - 1))} disabled={currentPage === 0}>Prev</button>
+          <span>{currentPage + 1} / {totalPages}</span>
+          <button onClick={() => setPage(Math.min(totalPages - 1, currentPage + 1))} disabled={currentPage + 1 >= totalPages}>Next</button>
         </div>
       </div>
 
       <div className="teacher-grid">
-        <TrackLoop tracks={pagedTracks}>
-          {(trackRef) => {
-            const studentId = getStudentIdentity(trackRef.participant.identity);
+        {pagedTracks.length === 0 ? (
+          <p className="muted">Waiting for student camera streams...</p>
+        ) : (
+          pagedTracks.map(({ id, participant, track }) => {
+            const studentId = getStudentIdentity(participant.identity);
             const score = snapshots[studentId] || null;
             const warning = !score || score.is_warning;
             return (
-              <article key={trackRef.participant.identity} className={`student-card ${warning ? 'warning' : ''}`}>
+              <article key={id} className={`student-card ${warning ? 'warning' : ''}`}>
                 <header>
                   <strong>{studentId}</strong>
                   <span>{score ? `${Math.round(score.score)}/100` : 'No data'}</span>
                 </header>
-                <VideoTrack trackRef={trackRef} />
+                <AttachedVideo track={track} />
                 <footer>
                   <span>{score?.status || 'Waiting...'}</span>
                   {!score?.camera_on && <span className="tag">Camera Off</span>}
                 </footer>
               </article>
             );
-          }}
-        </TrackLoop>
+          })
+        )}
       </div>
     </>
   );
@@ -146,7 +304,10 @@ export default function TeacherDashboard() {
         connect
         video
         audio={false}
-        onError={() => setError(`LiveKit connection failed: ${session.livekit_url}`)}
+        onError={(err) => setError(`LiveKit connection failed: ${err?.message || 'Unknown error'}`)}
+        onMediaDeviceFailure={(failure, kind) => {
+          setError(`Cannot start ${kind || 'media device'}: ${failure || 'permission or device error'}`);
+        }}
         className="room-shell"
       >
         <TeacherVideoGrid snapshots={scores} />

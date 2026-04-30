@@ -14,7 +14,7 @@ export function estimateHeadPose(faceLandmarks, frameWidth, frameHeight) {
   // Apply horizontal flip to match training (width inversion)
   const lx = (1.0 - leftEye.x) * frameWidth, ly = leftEye.y * frameHeight, lz = leftEye.z * frameWidth;
   const rx = (1.0 - rightEye.x) * frameWidth, ry = rightEye.y * frameHeight, rz = rightEye.z * frameWidth;
-  const nx = (1.0 - nose.x) * frameWidth, ny = nose.y * frameHeight, nz = nose.z * frameWidth;
+  const ny = nose.y * frameHeight, nz = nose.z * frameWidth;
 
   const dx = rx - lx;
   const dz = rz - lz;

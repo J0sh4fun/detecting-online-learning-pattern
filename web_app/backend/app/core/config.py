@@ -26,16 +26,27 @@ class Settings:
     livekit_api_key: str = os.getenv("LIVEKIT_API_KEY", "devkey")
     livekit_api_secret: str = os.getenv("LIVEKIT_API_SECRET", "secret")
     max_students_per_room: int = int(os.getenv("MAX_STUDENTS_PER_ROOM", "50"))
-    min_ingest_interval_sec: float = float(os.getenv("MIN_INGEST_INTERVAL_SEC", "2.0"))
+    min_ingest_interval_sec: float = float(os.getenv("MIN_INGEST_INTERVAL_SEC", "0.75"))
     score_low_threshold: float = float(os.getenv("SCORE_LOW_THRESHOLD", "55"))
     verify_discrepancy_threshold: float = float(os.getenv("VERIFY_DISCREPANCY_THRESHOLD", "25"))
 
     @property
     def project_root(self) -> Path:
-        return Path(__file__).resolve().parents[4]
+        configured = os.getenv("PROJECT_ROOT")
+        if configured:
+            return Path(configured)
+
+        current = Path(__file__).resolve()
+        for parent in current.parents:
+            if (parent / "model_pipeline").exists():
+                return parent
+        return _backend_root
 
     @property
     def model_pipeline_dir(self) -> Path:
+        configured = os.getenv("MODEL_PIPELINE_DIR")
+        if configured:
+            return Path(configured)
         return self.project_root / "model_pipeline"
 
     @property

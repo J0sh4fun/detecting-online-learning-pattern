@@ -34,7 +34,7 @@ class StudentScoreIngest(BaseModel):
     average_score: float = Field(ge=0, le=100)
     status: str = Field(min_length=2, max_length=80)
     camera_on: bool
-    sampled_fps: float = Field(ge=0.1, le=10)
+    sampled_fps: float = Field(ge=0.1, le=60)
     sample_count: int = Field(ge=1, le=50)
     client_sent_at: float
 
@@ -69,6 +69,18 @@ class VerifyFrameResponse(BaseModel):
     server_score: float
     server_status: str
     reason: str
+
+
+class ScoreFrameRequest(BaseModel):
+    token: str
+    room_code: str
+    student_id: str
+    frame_base64: str = Field(min_length=64)
+
+
+class ScoreFrameResponse(BaseModel):
+    score: float
+    status: str
 
 
 class StudentTimelinePoint(BaseModel):

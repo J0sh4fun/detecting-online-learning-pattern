@@ -1,17 +1,106 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
-import { LiveKitRoom, TrackLoop, VideoTrack, useLocalParticipant, useTracks } from '@livekit/components-react';
-import { Track } from 'livekit-client';
+import { LiveKitRoom, useLocalParticipant, useRoomContext } from '@livekit/components-react';
+import { RoomEvent, Track } from 'livekit-client';
 import '@livekit/components-styles';
-import { verifyFrame } from '../lib/api';
+import { scoreFrame, verifyFrame } from '../lib/api';
 import { getSession } from '../lib/sessionStore';
 
+function getCameraTrackItems(room, { includeLocal = true, participantFilter = () => true } = {}) {
+  const participants = [
+    ...(includeLocal ? [room.localParticipant] : []),
+    ...Array.from(room.remoteParticipants.values()),
+  ];
+
+  return participants.flatMap((participant) => (
+    Array.from(participant.trackPublications.values())
+      .filter((publication) => publication.source === Track.Source.Camera && publication.track && participantFilter(participant))
+      .map((publication) => ({
+        id: publication.trackSid || publication.sid || `${participant.identity}-${publication.trackName || 'camera'}`,
+        participant,
+        publication,
+        track: publication.track,
+      }))
+  ));
+}
+
+function useCameraTrackItems(options) {
+  const room = useRoomContext();
+  const [items, setItems] = useState(() => getCameraTrackItems(room, options));
+
+  useEffect(() => {
+    const refresh = () => {
+      for (const participant of room.remoteParticipants.values()) {
+        for (const publication of participant.trackPublications.values()) {
+          if (publication.source === Track.Source.Camera && !publication.track && typeof publication.setSubscribed === 'function') {
+            publication.setSubscribed(true);
+          }
+        }
+      }
+      setItems(getCameraTrackItems(room, options));
+    };
+
+    refresh();
+    room
+      .on(RoomEvent.ParticipantConnected, refresh)
+      .on(RoomEvent.ParticipantDisconnected, refresh)
+      .on(RoomEvent.TrackPublished, refresh)
+      .on(RoomEvent.TrackUnpublished, refresh)
+      .on(RoomEvent.TrackSubscribed, refresh)
+      .on(RoomEvent.TrackUnsubscribed, refresh)
+      .on(RoomEvent.LocalTrackPublished, refresh)
+      .on(RoomEvent.LocalTrackUnpublished, refresh)
+      .on(RoomEvent.ConnectionStateChanged, refresh);
+
+    return () => {
+      room
+        .off(RoomEvent.ParticipantConnected, refresh)
+        .off(RoomEvent.ParticipantDisconnected, refresh)
+        .off(RoomEvent.TrackPublished, refresh)
+        .off(RoomEvent.TrackUnpublished, refresh)
+        .off(RoomEvent.TrackSubscribed, refresh)
+        .off(RoomEvent.TrackUnsubscribed, refresh)
+        .off(RoomEvent.LocalTrackPublished, refresh)
+        .off(RoomEvent.LocalTrackUnpublished, refresh)
+        .off(RoomEvent.ConnectionStateChanged, refresh);
+    };
+  }, [room, options]);
+
+  return items;
+}
+
+function AttachedVideo({ track }) {
+  const videoRef = useRef(null);
+
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video || !track) return undefined;
+
+    track.attach(video);
+    video.play().catch(() => undefined);
+
+    return () => {
+      track.detach(video);
+    };
+  }, [track]);
+
+  return <video ref={videoRef} muted playsInline />;
+}
+
+function average(values) {
+  if (!values.length) return 100;
+  return values.reduce((sum, value) => sum + value, 0) / values.length;
+}
+
 function StudentAiPipeline({ session, roomId, studentId, setError }) {
-  const { localParticipant } = useLocalParticipant();
+  const { cameraTrack } = useLocalParticipant();
   const workerRef = useRef(null);
   const wsRef = useRef(null);
   const hiddenVideoRef = useRef(null);
   const captureTimerRef = useRef(null);
+  const lastScoreRef = useRef(100);
+  const scoreHistoryRef = useRef([]);
+  const lastSentAtRef = useRef(0);
 
   useEffect(() => {
     let disposed = false;
@@ -19,23 +108,40 @@ function StudentAiPipeline({ session, roomId, studentId, setError }) {
     workerRef.current = worker;
     worker.postMessage({
       type: 'init',
-      modelUrl: import.meta.env.VITE_POSTURE_MODEL_URL || '/models/best_posture_model.onnx',
-      targetFps: 1,
-      flushIntervalMs: 4000,
+      targetFps: 30,
+      flushIntervalMs: 250,
     });
 
     worker.onmessage = async (event) => {
       const payload = event.data;
-      if (payload.type === 'aggregate' && wsRef.current?.readyState === WebSocket.OPEN) {
-        wsRef.current.send(JSON.stringify({
-          token: session.session_token,
-          average_score: payload.averageScore,
-          status: payload.status,
-          camera_on: payload.cameraOn,
-          sampled_fps: payload.fps,
-          sample_count: payload.sampleCount,
-          client_sent_at: Date.now() / 1000,
-        }));
+      if (payload.type === 'score_frame') {
+        try {
+          const result = await scoreFrame({
+            token: session.session_token,
+            roomCode: roomId,
+            studentId,
+            frameBase64: payload.frameBase64,
+          });
+
+          scoreHistoryRef.current = [...scoreHistoryRef.current, result.score].slice(-10);
+          lastScoreRef.current = average(scoreHistoryRef.current);
+
+          const now = Date.now();
+          if (wsRef.current?.readyState === WebSocket.OPEN && now - lastSentAtRef.current >= 750) {
+            wsRef.current.send(JSON.stringify({
+              token: session.session_token,
+              average_score: lastScoreRef.current,
+              status: result.status,
+              camera_on: payload.cameraOn,
+              sampled_fps: payload.fps,
+              sample_count: scoreHistoryRef.current.length,
+              client_sent_at: now / 1000,
+            }));
+            lastSentAtRef.current = now;
+          }
+        } catch (err) {
+          setError(`Live scoring failed: ${err.message}`);
+        }
       }
 
       if (payload.type === 'verify_frame') {
@@ -44,7 +150,7 @@ function StudentAiPipeline({ session, roomId, studentId, setError }) {
             token: session.session_token,
             roomCode: roomId,
             studentId,
-            clientScore: payload.clientScore,
+            clientScore: lastScoreRef.current,
             frameBase64: payload.frameBase64,
           });
         } catch (err) {
@@ -79,8 +185,7 @@ function StudentAiPipeline({ session, roomId, studentId, setError }) {
   }, [roomId, session.session_token, setError, studentId]);
 
   useEffect(() => {
-    const publication = localParticipant.getTrackPublication(Track.Source.Camera);
-    const mediaStreamTrack = publication?.track?.mediaStreamTrack;
+    const mediaStreamTrack = cameraTrack?.track?.mediaStreamTrack;
     const video = hiddenVideoRef.current;
     if (!video || !mediaStreamTrack) return;
 
@@ -95,24 +200,26 @@ function StudentAiPipeline({ session, roomId, studentId, setError }) {
       }
       const frame = await createImageBitmap(video);
       workerRef.current.postMessage({ type: 'frame', frame, timestamp: Date.now() }, [frame]);
-    }, 1000);
-  }, [localParticipant]);
+    }, 33);
+  }, [cameraTrack]);
 
   return <video ref={hiddenVideoRef} muted playsInline style={{ display: 'none' }} />;
 }
 
 function StudentVideoGrid() {
-  const tracks = useTracks([{ source: Track.Source.Camera, withPlaceholder: true }], { onlySubscribed: false });
+  const tracks = useCameraTrackItems(useMemo(() => ({ includeLocal: true }), []));
   return (
     <section className="student-grid">
-      <TrackLoop tracks={tracks}>
-        {(trackRef) => (
-          <article key={`${trackRef.participant.identity}-${trackRef.source || 'camera'}`} className="student-view">
-            <header>{trackRef.participant.identity}</header>
-            <VideoTrack trackRef={trackRef} />
+      {tracks.length === 0 ? (
+        <p className="muted">Waiting for camera stream...</p>
+      ) : (
+        tracks.map(({ id, participant, track }) => (
+          <article key={id} className="student-view">
+            <header>{participant.identity}</header>
+            <AttachedVideo track={track} />
           </article>
-        )}
-      </TrackLoop>
+        ))
+      )}
     </section>
   );
 }
@@ -149,7 +256,10 @@ export default function StudentRoom() {
         connect
         video
         audio={false}
-        onError={() => setError(`LiveKit connection failed: ${session.livekit_url}`)}
+        onError={(err) => setError(`LiveKit connection failed: ${err?.message || 'Unknown error'}`)}
+        onMediaDeviceFailure={(failure, kind) => {
+          setError(`Cannot start ${kind || 'media device'}: ${failure || 'permission or device error'}`);
+        }}
         className="room-shell"
       >
         <StudentAiPipeline session={session} roomId={roomId} studentId={studentId} setError={setError} />

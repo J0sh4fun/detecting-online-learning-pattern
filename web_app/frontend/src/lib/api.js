@@ -47,6 +47,18 @@ export function verifyFrame({ token, roomCode, studentId, clientScore, frameBase
   });
 }
 
+export function scoreFrame({ token, roomCode, studentId, frameBase64 }) {
+  return request('/api/score/frame', {
+    method: 'POST',
+    body: JSON.stringify({
+      token,
+      room_code: roomCode,
+      student_id: studentId,
+      frame_base64: frameBase64,
+    }),
+  });
+}
+
 export const AppConfig = {
   apiBaseUrl: API_BASE_URL,
 };
