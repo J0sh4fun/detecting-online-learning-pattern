@@ -32,7 +32,6 @@ yolo26s.pt
 yolov8s.pt
 
 # Runtime/generated app files
-web_app/frontend/public/models/
 web_app/backend/.env
 web_app/frontend/.env
 
