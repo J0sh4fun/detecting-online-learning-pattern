@@ -28,7 +28,6 @@ pnpm-debug.log*
 
 # Model artifacts / large files
 *.h5
-*.onnx
 yolo26s.pt
 yolov8s.pt
 
