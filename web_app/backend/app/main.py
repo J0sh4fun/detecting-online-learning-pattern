@@ -113,6 +113,8 @@ def create_room(payload: CreateRoomRequest) -> RoomConnectionResponse:
         ),
         score_ws_url=f"ws://localhost:8000/ws/teacher/{room.room_code}",
         invitation_link=_build_invitation_link(room.room_code),
+        room_name=room.room_name,
+        teacher_id=room.teacher_id,
     )
 
 
@@ -144,6 +146,8 @@ def join_room(payload: JoinRoomRequest) -> RoomConnectionResponse:
             role="student",
         ),
         score_ws_url=f"ws://localhost:8000/ws/student/{room_code}/{student_id}",
+        room_name=room.room_name,
+        teacher_id=room.teacher_id,
     )
 
 
@@ -188,6 +192,7 @@ async def student_scores_socket(websocket: WebSocket, room_code: str, student_id
         return
 
     await websocket.accept()
+    await socket_manager.connect_student(room_code, student_id, websocket)
     await socket_manager.broadcast_snapshot(room_code)
 
     try:
@@ -209,12 +214,14 @@ async def student_scores_socket(websocket: WebSocket, room_code: str, student_id
             )
             await socket_manager.broadcast_snapshot(room_code)
     except WebSocketDisconnect:
+        socket_manager.disconnect_student(room_code, student_id)
         student = store.ensure_student(room_code=room_code, student_id=student_id)
         student.camera_on = False
         student.status = "Camera Off"
         student.last_update = datetime.now(timezone.utc)
         await socket_manager.broadcast_snapshot(room_code)
     except Exception:
+        socket_manager.disconnect_student(room_code, student_id)
         await websocket.close(code=4400, reason="Malformed payload")
 
 
@@ -284,7 +291,7 @@ def score_frame(payload: ScoreFrameRequest) -> ScoreFrameResponse:
 
 
 @app.post("/api/rooms/{room_code}/end", response_model=RoomReportResponse)
-def end_room(room_code: str, token: str = Query(...)) -> RoomReportResponse:
+async def end_room(room_code: str, token: str = Query(...)) -> RoomReportResponse:
     room_code = room_code.strip().upper()
     room = store.get_room(room_code)
     if not room:
@@ -295,6 +302,9 @@ def end_room(room_code: str, token: str = Query(...)) -> RoomReportResponse:
         raise HTTPException(status_code=403, detail="Invalid teacher token")
 
     store.end_room(room_code)
+    await socket_manager.broadcast_to_students(
+        room_code, {"type": "room_closed", "teacher_id": room.teacher_id}
+    )
     return get_room_report(room_code, token)
 
 
@@ -329,6 +339,7 @@ def get_room_report(room_code: str, token: str = Query(...)) -> RoomReportRespon
                         timestamp=sample.timestamp,
                         score=sample.score,
                         status=sample.status,
+                        camera_on=sample.camera_on,
                     )
                     for sample in samples
                 ],
@@ -338,8 +349,9 @@ def get_room_report(room_code: str, token: str = Query(...)) -> RoomReportRespon
     class_avg = round(class_total / len(room_students), 2) if room_students else 0.0
     return RoomReportResponse(
         room_code=room_code,
+        room_name=room.room_name,
+        teacher_id=room.teacher_id,
         generated_at=datetime.now(timezone.utc),
         class_average_score=class_avg,
         students=reports,
     )
-

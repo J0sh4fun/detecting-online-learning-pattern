@@ -12,6 +12,7 @@ from app.services.room_store import store
 class SocketManager:
     def __init__(self) -> None:
         self.teacher_sockets: dict[str, set[WebSocket]] = defaultdict(set)
+        self.student_sockets: dict[str, dict[str, WebSocket]] = defaultdict(dict)
 
     async def connect_teacher(self, room_code: str, websocket: WebSocket) -> None:
         await websocket.accept()
@@ -25,6 +26,21 @@ class SocketManager:
         room_set.discard(websocket)
         if not room_set:
             self.teacher_sockets.pop(room_code, None)
+
+    async def connect_student(self, room_code: str, student_id: str, websocket: WebSocket) -> None:
+        self.student_sockets[room_code][student_id] = websocket
+
+    def disconnect_student(self, room_code: str, student_id: str) -> None:
+        if room_code in self.student_sockets:
+            self.student_sockets[room_code].pop(student_id, None)
+
+    async def broadcast_to_students(self, room_code: str, payload: dict) -> None:
+        sockets = list(self.student_sockets.get(room_code, {}).values())
+        for socket in sockets:
+            try:
+                await socket.send_json(payload)
+            except Exception:
+                pass
 
     async def broadcast_snapshot(self, room_code: str) -> None:
         sockets = list(self.teacher_sockets.get(room_code, set()))
