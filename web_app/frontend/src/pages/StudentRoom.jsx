@@ -99,91 +99,90 @@ function StudentAiPipeline({ session, roomId, studentId, setError }) {
     let disposed = false;
     const worker = new Worker(new URL('../workers/aiWorker.js', import.meta.url), { type: 'module' });
     workerRef.current = worker;
+
+    const pose = new window.Pose({
+      locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}`
+    });
+    pose.setOptions({ modelComplexity: 0, smoothLandmarks: true, minDetectionConfidence: 0.5 });
+
+    const faceMesh = new window.FaceMesh({
+      locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}`
+    });
+    faceMesh.setOptions({ maxNumFaces: 1, refineLandmarks: true, minDetectionConfidence: 0.5 });
+
+    let lastPoseResults = null;
+    pose.onResults((results) => { lastPoseResults = results.poseLandmarks; });
+
+    const captureFrame = async () => {
+      if (disposed) return;
+      if (hiddenVideoRef.current && hiddenVideoRef.current.readyState >= 2) {
+        try {
+          await pose.send({ image: hiddenVideoRef.current });
+          await faceMesh.send({ image: hiddenVideoRef.current });
+        } catch (e) { }
+      }
+      captureTimerRef.current = setTimeout(captureFrame, 200); // 5 FPS
+    };
+
     worker.postMessage({
       type: 'init',
-      targetFps: 1,
-      flushIntervalMs: 4000,
       modelUrl: import.meta.env.VITE_POSTURE_MODEL_URL || '/models/best_posture_model.onnx',
     });
 
-    worker.onmessage = async (event) => {
+    faceMesh.onResults(async (results) => {
+      if (workerRef.current) {
+        let frameBitmap = null;
+        if (hiddenVideoRef.current && hiddenVideoRef.current.readyState >= 2) {
+          try { frameBitmap = await createImageBitmap(hiddenVideoRef.current); } catch (e) { }
+        }
+        workerRef.current.postMessage({
+          type: 'process_landmarks',
+          landmarks: lastPoseResults, // Might be null, worker handles it
+          faceLandmarks: results.multiFaceLandmarks?.[0],
+          width: hiddenVideoRef.current?.videoWidth || 640,
+          height: hiddenVideoRef.current?.videoHeight || 480,
+          frame: frameBitmap
+        }, frameBitmap ? [frameBitmap] : []);
+      }
+    });
+    captureTimerRef.current = setTimeout(captureFrame, 2000);
+
+    worker.onmessage = (event) => {
       const payload = event.data;
-      if (payload.type === 'score_update') {
-        lastScoreRef.current = payload.averageScore;
-        if (wsRef.current?.readyState === WebSocket.OPEN) {
-          wsRef.current.send(JSON.stringify({
-            token: session.session_token,
-            average_score: payload.averageScore,
-            status: payload.status,
-            camera_on: payload.cameraOn,
-            sampled_fps: payload.sampledFps,
-            sample_count: payload.sampleCount,
-            client_sent_at: Date.now() / 1000,
-          }));
-        }
-      }
-
-      if (payload.type === 'verify_frame') {
-        try {
-          await verifyFrame({
-            token: session.session_token,
-            roomCode: roomId,
-            studentId,
-            clientScore: lastScoreRef.current,
-            frameBase64: payload.frameBase64,
-          });
-        } catch (err) {
-          setError(`Verification failed: ${err.message}`);
-        }
-      }
-
-      if (payload.type === 'worker_error') {
-        setError(`AI worker error: ${payload.message}`);
+      if (payload.type === 'score_update' && wsRef.current?.readyState === WebSocket.OPEN) {
+        wsRef.current.send(JSON.stringify({
+          token: session.session_token,
+          average_score: payload.averageScore,
+          status: payload.status,
+          camera_on: true,
+          sampled_fps: 5.0,
+          sample_count: 5,
+          client_sent_at: Date.now() / 1000,
+        }));
       }
     };
 
     const wsBase = (import.meta.env.VITE_API_WS_BASE || 'ws://localhost:8000').replace(/\/$/, '');
-    wsRef.current = new WebSocket(`${wsBase}/ws/student/${roomId}/${encodeURIComponent(studentId)}`);
-    wsRef.current.onerror = () => {
-      if (!disposed) {
-        setError(`Score WebSocket disconnected (${wsBase})`);
-      }
-    };
-    wsRef.current.onclose = () => {
-      if (!disposed) {
-        setError(`Score stream closed (${wsBase})`);
-      }
-    };
+    const ws = new WebSocket(`${wsBase}/ws/student/${roomId}/${encodeURIComponent(studentId)}`);
+    wsRef.current = ws;
 
     return () => {
       disposed = true;
-      if (captureTimerRef.current) {
-        window.clearInterval(captureTimerRef.current);
-      }
-      if (wsRef.current && (wsRef.current.readyState === WebSocket.OPEN || wsRef.current.readyState === WebSocket.CONNECTING)) {
-        wsRef.current.close();
-      }
+      if (captureTimerRef.current) clearTimeout(captureTimerRef.current);
+      if (wsRef.current) wsRef.current.close();
       worker.terminate();
+      pose.close();
+      faceMesh.close();
     };
-  }, [roomId, session.session_token, setError, studentId]);
+  }, [roomId, session.session_token, studentId]);
 
   useEffect(() => {
     const mediaStreamTrack = cameraTrack?.track?.mediaStreamTrack;
-    const video = hiddenVideoRef.current;
-    if (!video || !mediaStreamTrack) return;
-
-    const stream = new MediaStream([mediaStreamTrack]);
-    video.srcObject = stream;
-    video.play().catch(() => undefined);
-
-    if (captureTimerRef.current) window.clearInterval(captureTimerRef.current);
-    captureTimerRef.current = window.setInterval(async () => {
-      if (!workerRef.current || !video.videoWidth || !video.videoHeight) {
-        return;
-      }
-      const frame = await createImageBitmap(video);
-      workerRef.current.postMessage({ type: 'frame', frame, timestamp: Date.now() }, [frame]);
-    }, 200);
+    if (hiddenVideoRef.current && mediaStreamTrack) {
+      const stream = new MediaStream([mediaStreamTrack]);
+      hiddenVideoRef.current.srcObject = stream;
+      hiddenVideoRef.current.play().catch(() => undefined);
+    }
   }, [cameraTrack]);
 
   return <video ref={hiddenVideoRef} muted playsInline style={{ display: 'none' }} />;
