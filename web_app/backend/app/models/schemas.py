@@ -27,6 +27,8 @@ class RoomConnectionResponse(BaseModel):
     session_token: str
     score_ws_url: str
     invitation_link: str | None = None
+    room_name: str | None = None
+    teacher_id: str | None = None
 
 
 class StudentScoreIngest(BaseModel):
@@ -87,6 +89,7 @@ class StudentTimelinePoint(BaseModel):
     timestamp: datetime
     score: float
     status: str
+    camera_on: bool
 
 
 class StudentReport(BaseModel):
@@ -97,7 +100,8 @@ class StudentReport(BaseModel):
 
 class RoomReportResponse(BaseModel):
     room_code: str
+    room_name: str
+    teacher_id: str
     generated_at: datetime
     class_average_score: float
     students: list[StudentReport]
-

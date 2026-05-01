@@ -37,6 +37,7 @@ class TimelineSample:
     timestamp: datetime
     score: float
     status: str
+    camera_on: bool
 
 
 class RoomStore:
@@ -95,7 +96,12 @@ class RoomStore:
         student.last_ingest_epoch = client_sent_at
 
         self.timeline[room_code][student_id].append(
-            TimelineSample(timestamp=now, score=average_score, status=status)
+            TimelineSample(
+                timestamp=now,
+                score=average_score,
+                status=status,
+                camera_on=camera_on,
+            )
         )
         return student
 
