@@ -3,7 +3,7 @@ import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { LiveKitRoom, useLocalParticipant, useRoomContext } from '@livekit/components-react';
 import { RoomEvent, Track } from 'livekit-client';
 import '@livekit/components-styles';
-import { scoreFrame, verifyFrame } from '../lib/api';
+import { verifyFrame } from '../lib/api';
 import { getSession } from '../lib/sessionStore';
 
 function getCameraTrackItems(room, { includeLocal = true, participantFilter = () => true } = {}) {
@@ -87,11 +87,6 @@ function AttachedVideo({ track }) {
   return <video ref={videoRef} muted playsInline />;
 }
 
-function average(values) {
-  if (!values.length) return 100;
-  return values.reduce((sum, value) => sum + value, 0) / values.length;
-}
-
 function StudentAiPipeline({ session, roomId, studentId, setError }) {
   const { cameraTrack } = useLocalParticipant();
   const workerRef = useRef(null);
@@ -99,8 +94,6 @@ function StudentAiPipeline({ session, roomId, studentId, setError }) {
   const hiddenVideoRef = useRef(null);
   const captureTimerRef = useRef(null);
   const lastScoreRef = useRef(100);
-  const scoreHistoryRef = useRef([]);
-  const lastSentAtRef = useRef(0);
 
   useEffect(() => {
     let disposed = false;
@@ -108,39 +101,25 @@ function StudentAiPipeline({ session, roomId, studentId, setError }) {
     workerRef.current = worker;
     worker.postMessage({
       type: 'init',
-      targetFps: 30,
-      flushIntervalMs: 250,
+      targetFps: 1,
+      flushIntervalMs: 4000,
+      modelUrl: import.meta.env.VITE_POSTURE_MODEL_URL || '/models/best_posture_model.onnx',
     });
 
     worker.onmessage = async (event) => {
       const payload = event.data;
-      if (payload.type === 'score_frame') {
-        try {
-          const result = await scoreFrame({
+      if (payload.type === 'score_update') {
+        lastScoreRef.current = payload.averageScore;
+        if (wsRef.current?.readyState === WebSocket.OPEN) {
+          wsRef.current.send(JSON.stringify({
             token: session.session_token,
-            roomCode: roomId,
-            studentId,
-            frameBase64: payload.frameBase64,
-          });
-
-          scoreHistoryRef.current = [...scoreHistoryRef.current, result.score].slice(-10);
-          lastScoreRef.current = average(scoreHistoryRef.current);
-
-          const now = Date.now();
-          if (wsRef.current?.readyState === WebSocket.OPEN && now - lastSentAtRef.current >= 750) {
-            wsRef.current.send(JSON.stringify({
-              token: session.session_token,
-              average_score: lastScoreRef.current,
-              status: result.status,
-              camera_on: payload.cameraOn,
-              sampled_fps: payload.fps,
-              sample_count: scoreHistoryRef.current.length,
-              client_sent_at: now / 1000,
-            }));
-            lastSentAtRef.current = now;
-          }
-        } catch (err) {
-          setError(`Live scoring failed: ${err.message}`);
+            average_score: payload.averageScore,
+            status: payload.status,
+            camera_on: payload.cameraOn,
+            sampled_fps: payload.sampledFps,
+            sample_count: payload.sampleCount,
+            client_sent_at: Date.now() / 1000,
+          }));
         }
       }
 
@@ -156,6 +135,10 @@ function StudentAiPipeline({ session, roomId, studentId, setError }) {
         } catch (err) {
           setError(`Verification failed: ${err.message}`);
         }
+      }
+
+      if (payload.type === 'worker_error') {
+        setError(`AI worker error: ${payload.message}`);
       }
     };
 
@@ -200,7 +183,7 @@ function StudentAiPipeline({ session, roomId, studentId, setError }) {
       }
       const frame = await createImageBitmap(video);
       workerRef.current.postMessage({ type: 'frame', frame, timestamp: Date.now() }, [frame]);
-    }, 33);
+    }, 200);
   }, [cameraTrack]);
 
   return <video ref={hiddenVideoRef} muted playsInline style={{ display: 'none' }} />;
