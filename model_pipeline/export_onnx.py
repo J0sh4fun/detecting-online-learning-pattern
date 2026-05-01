@@ -57,30 +57,27 @@ def export_yolo(weights_path: Path, output_dir: Path) -> Path:
 
 def export_posture(model_pkl: Path, output_onnx: Path) -> tuple[int, str, str]:
     output_onnx.parent.mkdir(parents=True, exist_ok=True)
-    code = f"""
-from pathlib import Path
-import joblib
-from skl2onnx import convert_sklearn
-from skl2onnx.common.data_types import FloatTensorType
+    try:
+        import joblib
+        from skl2onnx import convert_sklearn
+        from skl2onnx.common.data_types import FloatTensorType
 
-model_path = Path(r'''{str(model_pkl)}''')
-out_path = Path(r'''{str(output_onnx)}''')
-if not model_path.exists():
-    raise FileNotFoundError(f"Missing model file: {{model_path}}")
+        if not model_pkl.exists():
+            return 1, "", f"Missing model file: {model_pkl}"
 
-model = joblib.load(model_path)
-onx = convert_sklearn(model, initial_types=[('float_input', FloatTensorType([None, 8]))])
-out_path.write_bytes(onx.SerializeToString())
-print(out_path)
-"""
-    proc = subprocess.run(
-        [sys.executable, "-c", code],
-        capture_output=True,
-        text=True,
-        cwd=str(ROOT_DIR),
-        check=False,
-    )
-    return proc.returncode, proc.stdout.strip(), proc.stderr.strip()
+        model = joblib.load(model_pkl)
+        options = {type(model): {"zipmap": False}}
+        onx = convert_sklearn(
+            model,
+            initial_types=[("float_input", FloatTensorType([None, 8]))],
+            options=options,
+        )
+        output_onnx.write_bytes(onx.SerializeToString())
+        return 0, str(output_onnx), ""
+    except Exception as e:
+        import traceback
+
+        return 1, "", traceback.format_exc()
 
 
 def copy_to_frontend(src: Path) -> Path:
