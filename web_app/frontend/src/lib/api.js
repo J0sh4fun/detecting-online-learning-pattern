@@ -1,10 +1,42 @@
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
+const FALLBACK_API_BASE_URL = API_BASE_URL.includes('localhost')
+  ? API_BASE_URL.replace('localhost', '127.0.0.1')
+  : (API_BASE_URL.includes('127.0.0.1') ? API_BASE_URL.replace('127.0.0.1', 'localhost') : null);
 
-async function request(path, options = {}) {
-  const response = await fetch(`${API_BASE_URL}${path}`, {
+function isNetworkError(error) {
+  return error instanceof TypeError;
+}
+
+async function doRequest(baseUrl, path, options = {}) {
+  return fetch(`${baseUrl}${path}`, {
     headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
     ...options,
   });
+}
+
+async function request(path, options = {}) {
+  let response;
+  try {
+    response = await doRequest(API_BASE_URL, path, options);
+  } catch (error) {
+    if (FALLBACK_API_BASE_URL && isNetworkError(error)) {
+      try {
+        response = await doRequest(FALLBACK_API_BASE_URL, path, options);
+      } catch (fallbackError) {
+        throw new Error(
+          `Cannot connect to backend API (${API_BASE_URL} or ${FALLBACK_API_BASE_URL}). `
+          + 'Start FastAPI server: uvicorn main:app --reload --port 8000',
+          { cause: fallbackError },
+        );
+      }
+    } else {
+      throw new Error(
+        `Cannot connect to backend API (${API_BASE_URL}). `
+        + 'Start FastAPI server: uvicorn main:app --reload --port 8000',
+        { cause: error },
+      );
+    }
+  }
 
   if (!response.ok) {
     const payload = await response.json().catch(() => ({}));

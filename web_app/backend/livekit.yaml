@@ -2,7 +2,7 @@ port: 7880
 bind_addresses:
   - ""
 keys:
-  devkey: secret
+  devkey: 9f1c4d8a6b2e7f0c3a5d1e9b4c8f2a7d
 rtc:
   tcp_port: 7881
   port_range_start: 50000

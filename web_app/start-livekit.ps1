@@ -1,7 +1,8 @@
 param(
     [string]$ConfigPath = ".\backend\livekit.yaml",
     [string]$InstallDir = ".\livekit-bin",
-    [switch]$ForceInstall
+    [switch]$ForceInstall,
+    [switch]$Foreground
 )
 
 $ErrorActionPreference = 'Stop'
@@ -51,4 +52,35 @@ if (-not (Test-Path $resolvedConfigPath)) {
 
 Write-Host "Starting LiveKit server..."
 Write-Host "$livekitExe --config $resolvedConfigPath" -ForegroundColor Green
-& $livekitExe --config $resolvedConfigPath
+if ($Foreground) {
+    & $livekitExe --config $resolvedConfigPath
+    exit $LASTEXITCODE
+}
+
+$logsDir = Join-Path $PSScriptRoot "logs"
+if (-not (Test-Path $logsDir)) {
+    New-Item -ItemType Directory -Path $logsDir | Out-Null
+}
+
+$stdoutLog = Join-Path $logsDir "livekit.stdout.log"
+$stderrLog = Join-Path $logsDir "livekit.stderr.log"
+
+$process = Start-Process `
+    -FilePath $livekitExe `
+    -ArgumentList @("--config", $resolvedConfigPath) `
+    -WorkingDirectory $PSScriptRoot `
+    -RedirectStandardOutput $stdoutLog `
+    -RedirectStandardError $stderrLog `
+    -PassThru
+
+Start-Sleep -Seconds 2
+if ($process.HasExited) {
+    throw "LiveKit exited immediately (exit code: $($process.ExitCode)). Check logs: $stdoutLog and $stderrLog"
+}
+
+Write-Host "LiveKit is running in background (PID: $($process.Id))." -ForegroundColor Green
+Write-Host "Logs:" -ForegroundColor Cyan
+Write-Host "  stdout: $stdoutLog"
+Write-Host "  stderr: $stderrLog"
+Write-Host "Stop command:" -ForegroundColor Cyan
+Write-Host "  Stop-Process -Id $($process.Id)"
