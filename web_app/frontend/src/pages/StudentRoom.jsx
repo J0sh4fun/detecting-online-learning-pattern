@@ -86,7 +86,7 @@ function AttachedVideo({ track }) {
   return <video ref={videoRef} muted playsInline />;
 }
 
-function StudentAiPipeline({ session, roomId, studentId, setError }) {
+function StudentAiPipeline({ session, roomId, studentId, setError, setRoomClosedData }) {
   const { cameraTrack } = useLocalParticipant();
   const workerRef = useRef(null);
   const wsRef = useRef(null);
@@ -181,6 +181,16 @@ function StudentAiPipeline({ session, roomId, studentId, setError }) {
     const ws = new WebSocket(`${wsBase}/ws/student/${roomId}/${encodeURIComponent(studentId)}`);
     wsRef.current = ws;
     ws.onerror = () => setError(`Score WebSocket failed (${wsBase})`);
+    ws.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        if (data.type === 'room_closed') {
+          setRoomClosedData({ teacherName: data.teacher_id || 'The teacher' });
+        }
+      } catch (err) {
+        // Ignore parse errors for now
+      }
+    };
     ws.onclose = () => {
       if (!disposed) setError(`Score WebSocket closed (${wsBase})`);
     };
@@ -230,6 +240,7 @@ export default function StudentRoom() {
   const navigate = useNavigate();
   const location = useLocation();
   const [error, setError] = useState('');
+  const [roomClosedData, setRoomClosedData] = useState(null);
   const session = useMemo(() => location.state?.session || getSession('student'), [location.state?.session]);
 
   if (!session) {
@@ -263,9 +274,22 @@ export default function StudentRoom() {
         }}
         className="room-shell"
       >
-        <StudentAiPipeline session={session} roomId={roomId} studentId={studentId} setError={setError} />
+        <StudentAiPipeline session={session} roomId={roomId} studentId={studentId} setError={setError} setRoomClosedData={setRoomClosedData} />
         <StudentVideoGrid />
       </LiveKitRoom>
+
+      {roomClosedData && (
+        <div className="room-closed-overlay screen-center">
+          <div className="panel text-center animate-in">
+            <h2 className="error-text">Room Closed</h2>
+            <p><strong>{roomClosedData.teacherName}</strong> has closed the classroom.</p>
+            <p className="muted">The session has ended and scoring has stopped.</p>
+            <button className="primary-button mt-4" onClick={() => navigate('/')}>
+              Return to main screen
+            </button>
+          </div>
+        </div>
+      )}
     </main>
   );
 }
