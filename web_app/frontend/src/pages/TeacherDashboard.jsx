@@ -5,6 +5,7 @@ import { RoomEvent, Track } from 'livekit-client';
 import '@livekit/components-styles';
 import { endRoom } from '../lib/api';
 import { getSession } from '../lib/sessionStore';
+import ReportView from './ReportView';
 
 const PAGE_SIZE = 16;
 
@@ -371,18 +372,15 @@ export default function TeacherDashboard() {
       </LiveKitRoom>
 
       {report && (
-        <section className="panel report-panel">
-          <h2>Class Report</h2>
-          <p>Class average score: <strong>{report.class_average_score}</strong></p>
-          <div className="report-list">
-            {report.students.map((student) => (
-              <article key={student.student_id}>
-                <strong>{student.student_id}</strong>
-                <span>{student.average_score}</span>
-              </article>
-            ))}
-          </div>
-        </section>
+        <div className="report-overlay" style={{ position: 'fixed', inset: 0, zIndex: 100, background: 'var(--bg)', overflowY: 'auto', padding: '1.5rem' }}>
+          <ReportView 
+            report={report} 
+            onBack={() => {
+              setReport(null);
+              navigate('/');
+            }} 
+          />
+        </div>
       )}
     </main>
   );
