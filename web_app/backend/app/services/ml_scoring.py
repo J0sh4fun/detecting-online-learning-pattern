@@ -112,7 +112,6 @@ class VerificationScorer:
         if face_results.multi_face_landmarks:
             pose_x, pose_y = self._head_pose(face_results.multi_face_landmarks[0], w, h)
 
-        has_phone_like_gesture = min_hand_to_face < 0.18 and wrist_elevated
         return [
             float(neck_ratio),
             float(forward_lean_z),
@@ -122,7 +121,6 @@ class VerificationScorer:
             float(pose_x),
             float(pose_y),
             1.0 if wrist_elevated else 0.0,
-            1.0 if has_phone_like_gesture else 0.0,
         ]
 
     @staticmethod

@@ -18,7 +18,7 @@ if not os.path.exists(CSV_FILE):
         writer.writerow([
             'neck_ratio', 'forward_lean_z', 'shoulder_tilt', 'head_tilt', 
             'hand_to_face', 'pose_x', 'pose_y', 
-            'wrist_elevated', 'has_phone', 'label'
+            'wrist_elevated', 'label'
         ])
 
 def main():
@@ -64,7 +64,6 @@ def main():
 
         results = pose.process(image_rgb)
         mesh_results = face_mesh.process(image_rgb)
-        has_phone = classifier.detect_phone(frame)
 
         key = cv2.waitKey(1) & 0xFF
         if key == ord('q'):
@@ -109,7 +108,6 @@ def main():
                     round(features['pose_x'], 4),
                     round(features['pose_y'], 4),
                     int(features['wrist_elevated']),
-                    int(has_phone),
                     current_label
                 ]
             

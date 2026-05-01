@@ -1,151 +1,194 @@
-import pandas as pd
-import numpy as np
-import matplotlib.pyplot as plt
-import seaborn as sns
+from __future__ import annotations
+
+from pathlib import Path
+
 import joblib
-import os
-
-from sklearn.model_selection import train_test_split, cross_val_score, KFold
-from sklearn.preprocessing import StandardScaler, LabelEncoder, label_binarize
+import numpy as np
+import pandas as pd
 from sklearn.ensemble import RandomForestClassifier
+from sklearn.metrics import accuracy_score, balanced_accuracy_score, classification_report, confusion_matrix, f1_score
+from sklearn.model_selection import StratifiedKFold, cross_validate, train_test_split
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import StandardScaler
 from sklearn.svm import SVC
-from sklearn.metrics import accuracy_score, classification_report, confusion_matrix, r2_score
-from scipy import stats
 
-# Set visualization style
-sns.set(style="whitegrid")
+RANDOM_STATE = 42
+TEST_SIZE = 0.2
 
-# Loading the dataset provided in your project
-try:
-    df = pd.read_csv('/kaggle/input/datasets/minorin2847/posture-dataset/posture_dataset.csv')
-except:
-    # Fallback for local testing
-    df = pd.read_csv('data/posture_dataset.csv')
+# Canonical 8-feature posture design (has_phone removed).
+FEATURE_ORDER = [
+    "neck_ratio",
+    "forward_lean_z",
+    "shoulder_tilt_ratio",
+    "head_tilt_ratio",
+    "hand_to_face_ratio",
+    "pose_x",
+    "pose_y",
+    "wrist_elevated",
+]
 
-df = df.dropna()
-print(f"Total valid samples: {len(df)}")
-df.head()
+# Backward-compatible aliases for legacy datasets.
+FEATURE_ALIASES = {
+    "neck_ratio": ["neck_ratio", "neckneck_ratio"],
+    "forward_lean_z": ["forward_lean_z"],
+    "shoulder_tilt_ratio": ["shoulder_tilt_ratio", "shoulder_tilt"],
+    "head_tilt_ratio": ["head_tilt_ratio", "head_tilt"],
+    "hand_to_face_ratio": ["hand_to_face_ratio", "hand_to_face"],
+    "pose_x": ["pose_x"],
+    "pose_y": ["pose_y"],
+    "wrist_elevated": ["wrist_elevated"],
+}
 
-plt.figure(figsize=(10, 6))
-sns.countplot(data=df, x='label', palette='viridis')
-plt.title('Distribution of Posture Labels')
-plt.xlabel('Posture Category')
-plt.ylabel('Count')
-plt.xticks(rotation=45)
-plt.show()
+
+def load_dataset() -> pd.DataFrame:
+    candidates = [
+        Path("/kaggle/input/datasets/minorin2847/posture-dataset/posture_dataset.csv"),
+        Path("data/posture_dataset.csv"),
+    ]
+    for path in candidates:
+        if path.exists():
+            print(f"Loading dataset: {path}")
+            return pd.read_csv(path)
+    raise FileNotFoundError("Could not find posture_dataset.csv in expected locations.")
 
 
-plt.figure(figsize=(12, 10))
-# Calculate correlation on numeric columns only
-corr = df.drop('label', axis=1).corr()
-sns.heatmap(corr, annot=True, cmap='coolwarm', fmt=".2f")
-plt.title('Feature Correlation Heatmap')
-plt.show()
+def build_feature_frame(df: pd.DataFrame) -> pd.DataFrame:
+    data = df.copy()
 
-# Separate Features (X) and Labels (y)
-X = df.drop('label', axis=1)
-y = df['label']
+    selected = {}
+    for canonical_name in FEATURE_ORDER:
+        source = next((name for name in FEATURE_ALIASES[canonical_name] if name in data.columns), None)
+        if source is None:
+            raise ValueError(
+                f"Missing required feature for '{canonical_name}'. "
+                f"Expected one of: {FEATURE_ALIASES[canonical_name]}"
+            )
+        selected[canonical_name] = data[source]
 
-# Split Training (80%) and Testing (20%)
-# Stratify ensures the class distribution is preserved in both sets
-X_train, X_test, y_train, y_test = train_test_split(
-    X, y, test_size=0.2, random_state=42, stratify=y
-)
+    feature_df = pd.DataFrame(selected)
+    return feature_df
 
-print(f"Training samples: {len(X_train)}")
-print(f"Testing samples: {len(X_test)}")
 
-# Feature Scaling (Standardization)
-scaler = StandardScaler()
-X_train_scaled = scaler.fit_transform(X_train)
-X_test_scaled = scaler.transform(X_test)
+def build_models() -> dict[str, Pipeline]:
+    return {
+        "random_forest": Pipeline(
+            steps=[
+                ("scaler", StandardScaler()),
+                (
+                    "model",
+                    RandomForestClassifier(
+                        n_estimators=150,
+                        max_depth=15,
+                        class_weight="balanced",
+                        random_state=RANDOM_STATE,
+                    ),
+                ),
+            ]
+        ),
+        "svm_rbf": Pipeline(
+            steps=[
+                ("scaler", StandardScaler()),
+                (
+                    "model",
+                    SVC(
+                        kernel="rbf",
+                        C=1.0,
+                        class_weight="balanced",
+                        probability=True,
+                        random_state=RANDOM_STATE,
+                    ),
+                ),
+            ]
+        ),
+    }
 
-# Save the scaler for inference use
-os.makedirs("models", exist_ok=True)
-joblib.dump(scaler, 'models/scaler.pkl')
 
-# 1. Random Forest Training
-print("Training Random Forest...")
-rf_model = RandomForestClassifier(
-    n_estimators=150,
-    max_depth=15,
-    class_weight='balanced',
-    random_state=42
-)
-rf_model.fit(X_train_scaled, y_train)
+def main() -> None:
+    df = load_dataset().dropna().copy()
+    print(f"Total valid samples: {len(df)}")
 
-# 2. Support Vector Machine (SVM) Training
-print("Training SVM...")
-svm_model = SVC(
-    kernel='rbf',
-    C=1.0,
-    class_weight='balanced',
-    probability=True,
-    random_state=42
-)
-svm_model.fit(X_train_scaled, y_train)
+    X = build_feature_frame(df)
+    y = df["label"].astype(str)
 
-rf_pred = rf_model.predict(X_test_scaled)
-svm_pred = svm_model.predict(X_test_scaled)
+    X_train, X_test, y_train, y_test = train_test_split(
+        X,
+        y,
+        test_size=TEST_SIZE,
+        random_state=RANDOM_STATE,
+        stratify=y,
+    )
+    print(f"Training samples: {len(X_train)}")
+    print(f"Testing samples: {len(X_test)}")
 
-rf_acc = accuracy_score(y_test, rf_pred)
-svm_acc = accuracy_score(y_test, svm_pred)
+    cv = StratifiedKFold(n_splits=10, shuffle=True, random_state=RANDOM_STATE)
+    scoring = {
+        "accuracy": "accuracy",
+        "f1_macro": "f1_macro",
+        "balanced_accuracy": "balanced_accuracy",
+    }
 
-print(f"Random Forest Accuracy: {rf_acc * 100:.2f}%")
-print(f"SVM Accuracy: {svm_acc * 100:.2f}%")
+    models = build_models()
+    cv_results = {}
 
-# 1. R^2 Evaluation (Caution: R^2 is for Regression)
-# To calculate R^2 for classification, we treat the categorical labels as integers.
-# Note: This is not a standard way to evaluate a classifier.
-le = LabelEncoder()
-y_test_encoded = le.fit_transform(y_test)
-rf_pred_encoded = le.transform(rf_model.predict(X_test_scaled))
+    print("\n=== Cross-validation (leakage-safe pipelines) ===")
+    for name, pipeline in models.items():
+        scores = cross_validate(
+            pipeline,
+            X_train,
+            y_train,
+            cv=cv,
+            scoring=scoring,
+            n_jobs=-1,
+            return_train_score=False,
+        )
+        summary = {metric: float(np.mean(values)) for metric, values in scores.items() if metric.startswith("test_")}
+        cv_results[name] = summary
+        print(
+            f"{name:14s} | "
+            f"acc={summary['test_accuracy']:.4f} | "
+            f"f1_macro={summary['test_f1_macro']:.4f} | "
+            f"bal_acc={summary['test_balanced_accuracy']:.4f}"
+        )
 
-rf_r2 = r2_score(y_test_encoded, rf_pred_encoded)
-print(f"Random Forest Pseudo-R^2 (based on encoded labels): {rf_r2:.4f}")
+    best_name = max(
+        cv_results,
+        key=lambda model_name: (
+            cv_results[model_name]["test_f1_macro"],
+            cv_results[model_name]["test_accuracy"],
+        ),
+    )
+    best_pipeline = models[best_name]
+    print(f"\nSelected model by CV: {best_name}")
 
-# 2. Statistical Significance (p-value) Comparison
-# We use 10-fold cross-validation to get a distribution of accuracy scores
-# and then perform a Paired T-Test to see if the models are significantly different.
-print("\nCalculating p-value for model comparison (10-fold CV)...")
-kfold = KFold(n_splits=10, shuffle=True, random_state=42)
+    best_pipeline.fit(X_train, y_train)
+    y_pred = best_pipeline.predict(X_test)
 
-rf_cv_scores = cross_val_score(rf_model, X_train_scaled, y_train, cv=kfold)
-svm_cv_scores = cross_val_score(svm_model, X_train_scaled, y_train, cv=kfold)
+    test_acc = accuracy_score(y_test, y_pred)
+    test_f1 = f1_score(y_test, y_pred, average="macro")
+    test_bal_acc = balanced_accuracy_score(y_test, y_pred)
 
-# Perform Paired T-Test
-t_stat, p_value = stats.ttest_rel(rf_cv_scores, svm_cv_scores)
+    print("\n=== Test set evaluation (single final hold-out) ===")
+    print(f"accuracy:          {test_acc:.4f}")
+    print(f"f1_macro:          {test_f1:.4f}")
+    print(f"balanced_accuracy: {test_bal_acc:.4f}")
+    print("\nClassification report:")
+    print(classification_report(y_test, y_pred, digits=4))
+    print("Confusion matrix:")
+    print(confusion_matrix(y_test, y_pred))
 
-print(f"Random Forest CV Mean Accuracy: {rf_cv_scores.mean():.4f}")
-print(f"SVM CV Mean Accuracy:           {svm_cv_scores.mean():.4f}")
-print(f"Comparison p-value:             {p_value:.2e}")
+    models_dir = Path("models")
+    models_dir.mkdir(parents=True, exist_ok=True)
 
-if p_value < 0.05:
-    print("=> Result: The performance difference is statistically significant (p < 0.05).")
-else:
-    print("=> Result: The performance difference is NOT statistically significant (p >= 0.05).")
+    scaler = best_pipeline.named_steps["scaler"]
+    model = best_pipeline.named_steps["model"]
+    joblib.dump(scaler, models_dir / "scaler.pkl")
+    joblib.dump(model, models_dir / "best_posture_model.pkl")
 
-# Select best model
-best_model = rf_model if rf_acc >= svm_acc else svm_model
-joblib.dump(best_model, 'models/best_posture_model.pkl')
+    print("\nSaved artifacts:")
+    print(f"- {models_dir / 'scaler.pkl'}")
+    print(f"- {models_dir / 'best_posture_model.pkl'}")
 
-plt.figure(figsize=(8, 6))
-cm = confusion_matrix(y_test, rf_model.predict(X_test_scaled))
-sns.heatmap(cm, annot=True, fmt='d', cmap='Blues',
-            xticklabels=rf_model.classes_,
-            yticklabels=rf_model.classes_)
-plt.title('Confusion Matrix: Random Forest')
-plt.ylabel('Actual Label')
-plt.xlabel('Predicted Label')
-plt.show()
 
-importances = rf_model.feature_importances_
-indices = np.argsort(importances)[::-1]
-features = X.columns
+if __name__ == "__main__":
+    main()
 
-plt.figure(figsize=(12, 6))
-plt.title('Feature Importance for Posture Detection')
-plt.bar(range(X.shape[1]), importances[indices], align='center', color='teal')
-plt.xticks(range(X.shape[1]), [features[i] for i in indices], rotation=45)
-plt.tight_layout()
-plt.show()
