@@ -118,26 +118,53 @@ function TeacherStatusTable({ students }) {
           <tr>
             <th>Student</th>
             <th>Status</th>
-            <th>Focus score</th>
+            <th style={{ width: '30%' }}>Focus Level</th>
             <th>Camera</th>
-            <th>Updated</th>
+            <th>Last Update</th>
           </tr>
         </thead>
         <tbody>
           {students.length === 0 ? (
             <tr>
-              <td colSpan="5" className="empty-cell">Waiting for students...</td>
+              <td colSpan="5" className="empty-cell">Waiting for students to join...</td>
             </tr>
           ) : (
-            students.map((student) => (
-              <tr key={student.studentId}>
-                <td>{student.studentId}</td>
-                <td>{student.status}</td>
-                <td>{student.score}</td>
-                <td>{student.camera}</td>
-                <td>{formatUpdateAge(student.lastUpdate, now)}</td>
-              </tr>
-            ))
+            students.map((student) => {
+              const scoreNum = parseFloat(student.score) || 0;
+              const isCameraOff = student.camera === 'Off';
+              const statusClass = student.status === 'Focused' ? 'success' : student.status === 'Absence' || student.status === 'Using Phone' ? 'error' : 'warning';
+
+              return (
+                <tr key={student.studentId}>
+                  <td className="bold">{student.studentId}</td>
+                  <td>
+                    <span className={`status-badge ${statusClass}`}>
+                      {student.status}
+                    </span>
+                  </td>
+                  <td>
+                    <div className="table-score-container">
+                      <div className="table-score-bar">
+                        <div 
+                          className="bar-fill" 
+                          style={{ 
+                            width: `${scoreNum}%`,
+                            backgroundColor: scoreNum > 70 ? 'var(--success)' : scoreNum > 40 ? 'var(--warning)' : 'var(--error)'
+                          }}
+                        ></div>
+                      </div>
+                      <span className="score-label">{Math.round(scoreNum)}%</span>
+                    </div>
+                  </td>
+                  <td>
+                    <span className={`camera-tag ${isCameraOff ? 'off' : 'on'}`}>
+                      {student.camera}
+                    </span>
+                  </td>
+                  <td className="muted text-sm">{formatUpdateAge(student.lastUpdate, now)}</td>
+                </tr>
+              );
+            })
           )}
         </tbody>
       </table>
@@ -208,12 +235,25 @@ function TeacherVideoGrid({ snapshots }) {
               <article key={id} className={`student-card ${warning ? 'warning' : ''}`}>
                 <header>
                   <strong>{studentId}</strong>
-                  <span>{score ? `${Math.round(score.score)}/100` : 'No data'}</span>
+                  <div className="card-score-mini">
+                    <div className="mini-bar">
+                      <div 
+                        className="bar-fill" 
+                        style={{ 
+                          width: `${Math.round(score?.score || 0)}%`,
+                          backgroundColor: (score?.score || 0) > 70 ? 'var(--success)' : (score?.score || 0) > 40 ? 'var(--warning)' : 'var(--error)'
+                        }}
+                      />
+                    </div>
+                    <span>{score ? Math.round(score.score) : 0}%</span>
+                  </div>
                 </header>
                 <AttachedVideo track={track} />
                 <footer>
-                  <span>{score?.status || 'Waiting...'}</span>
-                  {!score?.camera_on && <span className="tag">Camera Off</span>}
+                  <span className={`status-tag ${(score?.status || 'Waiting') === 'Focused' ? 'success' : 'warning'}`}>
+                    {score?.status || 'Waiting...'}
+                  </span>
+                  {!score?.camera_on && <span className="tag error">Camera Off</span>}
                 </footer>
               </article>
             );
