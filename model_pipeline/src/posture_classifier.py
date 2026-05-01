@@ -13,7 +13,7 @@ class PostureClassifier:
         self.mp_pose = mp.solutions.pose
         self.mp_face_mesh = mp.solutions.face_mesh
         
-        # 2. Khởi tạo YOLO (Tăng Thresh lên 0.55 để không nhận nhầm bàn phím)
+        # 2. Khởi tạo YOLO
         self.yolo_model = YOLO('yolo26s.pt')
         self.CELL_PHONE_CLASS_ID = 67 
         self.THRESH_PHONE_CONF = 0.55
@@ -94,7 +94,7 @@ class PostureClassifier:
             "coords": {"nose": nose, "mid_shoulder": mid_shoulder, "mid_ear": mid_ear}
         }
 
-    def _predict_ml(self, features, has_phone):
+    def _predict_ml(self, features):
         """Dự đoán các tư thế khác bằng mô hình AI"""
         feature_vector = np.array([[
             features['neck_ratio'], 
@@ -104,8 +104,7 @@ class PostureClassifier:
             features['hand_to_face_ratio'], 
             features['pose_x'], 
             features['pose_y'], 
-            int(features['wrist_elevated']), 
-            int(has_phone)
+            int(features['wrist_elevated'])
         ]])
 
         scaled_vector = self.scaler.transform(feature_vector)
@@ -128,18 +127,13 @@ class PostureClassifier:
             raw_label = "Absence"
         
         # 2. ƯU TIÊN YOLO: Nếu YOLO thấy điện thoại, gán nhãn ngay lập tức
-        wrist_visible = landmarks[self.mp_pose.PoseLandmark.LEFT_WRIST.value].visibility > 0.5 or \
-                        landmarks[self.mp_pose.PoseLandmark.RIGHT_WRIST.value].visibility > 0.5
-        
-        hand_near_ear = features['hand_to_face_ratio'] < 0.18
-        
-        # If YOLO detects the phone OR the gesture indicates calling/browsing
-        if has_phone or (hand_near_ear and wrist_visible):
+        # Only YOLO decides "Using Phone"
+        if has_phone:
             raw_label = "Using Phone"
             
         else:
             # 3. Dùng AI dự đoán các tư thế như Focused, Slouching, v.v.
-            raw_label = self._predict_ml(features, has_phone)
+            raw_label = self._predict_ml(features)
             
         # Làm mịn kết quả bằng mode (nhãn xuất hiện nhiều nhất trong history)
         self.label_history.append(raw_label)
