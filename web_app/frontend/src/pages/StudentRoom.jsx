@@ -3,7 +3,6 @@ import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { LiveKitRoom, useLocalParticipant, useRoomContext } from '@livekit/components-react';
 import { RoomEvent, Track } from 'livekit-client';
 import '@livekit/components-styles';
-import { verifyFrame } from '../lib/api';
 import { getSession } from '../lib/sessionStore';
 
 function getCameraTrackItems(room, { includeLocal = true, participantFilter = () => true } = {}) {
@@ -119,7 +118,9 @@ function StudentAiPipeline({ session, roomId, studentId, setError }) {
         try {
           await pose.send({ image: hiddenVideoRef.current });
           await faceMesh.send({ image: hiddenVideoRef.current });
-        } catch (e) { }
+        } catch {
+          // Keep loop alive on transient frame processing errors.
+        }
       }
       captureTimerRef.current = setTimeout(captureFrame, 200); // 5 FPS
     };
@@ -127,13 +128,22 @@ function StudentAiPipeline({ session, roomId, studentId, setError }) {
     worker.postMessage({
       type: 'init',
       modelUrl: import.meta.env.VITE_POSTURE_MODEL_URL || '/models/best_posture_model.onnx',
+      yoloUrl: import.meta.env.VITE_PHONE_MODEL_URL || '/models/yolo26s.onnx',
+      flushIntervalMs: 2000,
+      sampledFps: 5,
+      yoloCheckInterval: 2,
+      maxHistory: 6,
     });
 
     faceMesh.onResults(async (results) => {
       if (workerRef.current) {
         let frameBitmap = null;
         if (hiddenVideoRef.current && hiddenVideoRef.current.readyState >= 2) {
-          try { frameBitmap = await createImageBitmap(hiddenVideoRef.current); } catch (e) { }
+          try {
+            frameBitmap = await createImageBitmap(hiddenVideoRef.current);
+          } catch {
+            // Skip this frame if ImageBitmap creation fails.
+          }
         }
         workerRef.current.postMessage({
           type: 'process_landmarks',
@@ -145,26 +155,35 @@ function StudentAiPipeline({ session, roomId, studentId, setError }) {
         }, frameBitmap ? [frameBitmap] : []);
       }
     });
-    captureTimerRef.current = setTimeout(captureFrame, 2000);
+    captureTimerRef.current = setTimeout(captureFrame, 200);
 
     worker.onmessage = (event) => {
       const payload = event.data;
       if (payload.type === 'score_update' && wsRef.current?.readyState === WebSocket.OPEN) {
+        lastScoreRef.current = payload.averageScore;
         wsRef.current.send(JSON.stringify({
           token: session.session_token,
           average_score: payload.averageScore,
           status: payload.status,
-          camera_on: true,
-          sampled_fps: 5.0,
-          sample_count: 5,
+          camera_on: payload.cameraOn ?? true,
+          sampled_fps: payload.sampledFps ?? 5.0,
+          sample_count: payload.sampleCount ?? 1,
           client_sent_at: Date.now() / 1000,
         }));
+      }
+
+      if (payload.type === 'worker_error') {
+        setError(`AI worker: ${payload.message}`);
       }
     };
 
     const wsBase = (import.meta.env.VITE_API_WS_BASE || 'ws://localhost:8000').replace(/\/$/, '');
     const ws = new WebSocket(`${wsBase}/ws/student/${roomId}/${encodeURIComponent(studentId)}`);
     wsRef.current = ws;
+    ws.onerror = () => setError(`Score WebSocket failed (${wsBase})`);
+    ws.onclose = () => {
+      if (!disposed) setError(`Score WebSocket closed (${wsBase})`);
+    };
 
     return () => {
       disposed = true;
@@ -174,7 +193,7 @@ function StudentAiPipeline({ session, roomId, studentId, setError }) {
       pose.close();
       faceMesh.close();
     };
-  }, [roomId, session.session_token, studentId]);
+  }, [roomId, session.session_token, studentId, setError]);
 
   useEffect(() => {
     const mediaStreamTrack = cameraTrack?.track?.mediaStreamTrack;

@@ -14,7 +14,7 @@ services:
       - LIVEKIT_URL=ws://localhost:7880
       - LIVEKIT_API_KEY=devkey
       - LIVEKIT_API_SECRET=9f1c4d8a6b2e7f0c3a5d1e9b4c8f2a7d
-      - MAX_STUDENTS_PER_ROOM=50
+      - MAX_STUDENTS_PER_ROOM=20
       - MIN_INGEST_INTERVAL_SEC=0.75
       - SCORE_LOW_THRESHOLD=55
       - VERIFY_DISCREPANCY_THRESHOLD=25
@@ -35,6 +35,7 @@ services:
       - VITE_API_BASE_URL=http://localhost:8000
       - VITE_API_WS_BASE=ws://localhost:8000
       - VITE_POSTURE_MODEL_URL=/models/best_posture_model.onnx
+      - VITE_PHONE_MODEL_URL=/models/yolo26s.onnx
     volumes:
       - ./frontend:/app
       - /app/node_modules

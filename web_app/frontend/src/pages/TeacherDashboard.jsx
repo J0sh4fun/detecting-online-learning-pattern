@@ -272,6 +272,7 @@ export default function TeacherDashboard() {
   const [scores, setScores] = useState({});
   const [report, setReport] = useState(null);
   const [error, setError] = useState('');
+  const [instructorMode, setInstructorMode] = useState(false);
 
   useEffect(() => {
     if (!session?.session_token || !roomId) return;
@@ -324,6 +325,11 @@ export default function TeacherDashboard() {
     }
   }
 
+  function toggleInstructorMode() {
+    setError('');
+    setInstructorMode((current) => !current);
+  }
+
   return (
     <main className="teacher-layout">
       <header className="teacher-header panel">
@@ -332,21 +338,32 @@ export default function TeacherDashboard() {
           <p className="muted">
             Room <strong>{roomId}</strong> | Invite: <code>{session.invitation_link}</code>
           </p>
+          <p className="muted">
+            Mode: <strong>{instructorMode ? 'Instructor (Camera + Mic ON)' : 'Viewer only (Camera + Mic OFF)'}</strong>
+          </p>
         </div>
-        <button onClick={handleEndClass}>End class and report</button>
+        <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
+          <button onClick={toggleInstructorMode}>
+            {instructorMode ? 'Switch to viewer-only' : 'Join as instructor'}
+          </button>
+          <button onClick={handleEndClass}>End class and report</button>
+        </div>
       </header>
 
       {error && <p className="error-text">{error}</p>}
 
       <LiveKitRoom
+        key={`teacher-room-${roomId}-${instructorMode ? 'instructor' : 'viewer'}`}
         token={session.livekit_token}
         serverUrl={session.livekit_url}
         connect
-        video
-        audio={false}
+        video={instructorMode}
+        audio={instructorMode}
         onError={(err) => setError(`LiveKit connection failed: ${err?.message || 'Unknown error'}`)}
         onMediaDeviceFailure={(failure, kind) => {
-          setError(`Cannot start ${kind || 'media device'}: ${failure || 'permission or device error'}`);
+          const issue = String(failure || 'permission or device error');
+          setError(`Cannot start ${kind || 'media device'}: ${issue}`);
+          setInstructorMode(false);
         }}
         className="room-shell"
       >

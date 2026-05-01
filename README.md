@@ -46,7 +46,7 @@ online_study_detech/
 - **Anti-cheat verification API**: receives random frame, reruns server-side verification model, and flags large discrepancies.
 - **Teacher dashboard**: LiveKit camera smart-grid with pagination and red warning highlights.
 - **Student room**: LiveKit classroom view with hidden AI pipeline (no score/box overlays).
-- **aiWorker.js**: ONNX worker loop at 1 FPS + 4s score batching + random 5-10 minute silent verification frame emission.
+- **aiWorker.js**: ONNX worker loop with posture + YOLO phone detection, 2s score batching, and silent verification flow.
 
 ## Run steps (Windows local)
 
@@ -68,7 +68,9 @@ online_study_detech/
    - `cd web_app\frontend`
    - `npm install`
    - `npm run dev`
-5. Ensure ONNX model exists at `web_app\frontend\public\models\best_posture_model.onnx`.
+5. Ensure ONNX models exist:
+   - `web_app\frontend\public\models\best_posture_model.onnx`
+   - `web_app\frontend\public\models\yolo26s.onnx`
 6. Optional helper script:
    - `powershell -ExecutionPolicy Bypass -File web_app\start-local.ps1`
 7. One-command run script (opens backend + frontend terminals):
