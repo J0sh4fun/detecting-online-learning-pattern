@@ -8,6 +8,37 @@ from pydantic import BaseModel, Field
 
 RoleLiteral = Literal["teacher", "student"]
 
+class RegisterRequest(BaseModel):
+    username: str = Field(min_length=2, max_length=64)
+    password: str = Field(min_length=6)
+    role: RoleLiteral
+
+class LoginRequest(BaseModel):
+    username: str = Field(min_length=2, max_length=64)
+    password: str = Field(min_length=1)
+
+class AuthResponse(BaseModel):
+    id: int
+    username: str
+    role: str
+    token: str
+
+class UserResponse(BaseModel):
+    id: int
+    username: str
+    role: str
+
+class RoomHistoryItem(BaseModel):
+    room_code: str
+    room_name: str
+    status: str
+    created_at: datetime
+    ended_at: datetime | None
+    student_count: int
+    class_average: float | None
+
+class RoomHistoryListResponse(BaseModel):
+    rooms: list[RoomHistoryItem]
 
 class CreateRoomRequest(BaseModel):
     teacher_id: str = Field(min_length=2, max_length=64)

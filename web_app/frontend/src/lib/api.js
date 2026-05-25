@@ -8,9 +8,15 @@ function isNetworkError(error) {
 }
 
 async function doRequest(baseUrl, path, options = {}) {
+  const token = localStorage.getItem('focus_auth_token');
+  const headers = { 'Content-Type': 'application/json', ...(options.headers || {}) };
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+  
   return fetch(`${baseUrl}${path}`, {
-    headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
     ...options,
+    headers,
   });
 }
 
@@ -45,17 +51,17 @@ async function request(path, options = {}) {
   return response.json();
 }
 
-export function createRoom({ teacherId, roomName }) {
+export function createRoom({ roomName }) {
   return request('/api/rooms', {
     method: 'POST',
-    body: JSON.stringify({ teacher_id: teacherId, room_name: roomName }),
+    body: JSON.stringify({ teacher_id: "me", room_name: roomName }),
   });
 }
 
-export function joinRoom({ roomCode, studentId }) {
+export function joinRoom({ roomCode }) {
   return request('/api/rooms/join', {
     method: 'POST',
-    body: JSON.stringify({ room_code: roomCode, student_id: studentId }),
+    body: JSON.stringify({ room_code: roomCode, student_id: "me" }),
   });
 }
 
@@ -94,4 +100,36 @@ export function scoreFrame({ token, roomCode, studentId, frameBase64 }) {
 export const AppConfig = {
   apiBaseUrl: API_BASE_URL,
 };
+
+export function register({ username, password, role }) {
+  return request('/api/auth/register', {
+    method: 'POST',
+    body: JSON.stringify({ username, password, role }),
+  });
+}
+
+export function login({ username, password }) {
+  return request('/api/auth/login', {
+    method: 'POST',
+    body: JSON.stringify({ username, password }),
+  });
+}
+
+export function getMe() {
+  return request('/api/auth/me', {
+    method: 'GET',
+  });
+}
+
+export function getClassHistory() {
+  return request('/api/history/rooms', {
+    method: 'GET',
+  });
+}
+
+export function getClassReport(roomCode) {
+  return request(`/api/history/rooms/${encodeURIComponent(roomCode)}/report`, {
+    method: 'GET',
+  });
+}
 
