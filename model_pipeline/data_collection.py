@@ -4,24 +4,76 @@ import csv
 import os
 import time
 import mediapipe as mp
+from uuid import uuid4
 from src.posture_classifier import PostureClassifier
+from src.feature_schema import FEATURE_ALIASES, FEATURE_ORDER, METADATA_COLUMNS, NO_HAND_VISIBLE_RATIO, OUTPUT_COLUMNS
 
 # Đường dẫn tệp CSV
 DATA_DIR = "data"
 CSV_FILE = os.path.join(DATA_DIR, "posture_dataset.csv")
+COLLECTION_INTERVAL_SEC = 0.25
+CANONICAL_FIELDNAMES = OUTPUT_COLUMNS
+LEGACY_COLUMN_ALIASES = {**FEATURE_ALIASES, "label": ["label"]}
 
 os.makedirs(DATA_DIR, exist_ok=True)
 
-if not os.path.exists(CSV_FILE):
-    with open(CSV_FILE, mode='w', newline='') as f:
-        writer = csv.writer(f)
-        writer.writerow([
-            'neck_ratio', 'forward_lean_z', 'shoulder_tilt', 'head_tilt', 
-            'hand_to_face', 'pose_x', 'pose_y', 
-            'wrist_elevated', 'label'
-        ])
+def get_csv_fieldnames():
+    if os.path.exists(CSV_FILE):
+        with open(CSV_FILE, mode="r", newline="") as f:
+            reader = csv.DictReader(f)
+            header = reader.fieldnames
+            rows = list(reader)
+        if header and all(name in header for name in CANONICAL_FIELDNAMES):
+            return CANONICAL_FIELDNAMES
+        if header:
+            migrate_csv_schema(rows)
+            return CANONICAL_FIELDNAMES
+
+    fieldnames = CANONICAL_FIELDNAMES
+    with open(CSV_FILE, mode="w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer.writeheader()
+    return fieldnames
+
+
+def migrate_csv_schema(rows):
+    migrated_rows = []
+    for row in rows:
+        migrated = {name: "" for name in CANONICAL_FIELDNAMES}
+        for column, aliases in LEGACY_COLUMN_ALIASES.items():
+            for alias in aliases:
+                value = row.get(alias)
+                if value not in (None, ""):
+                    migrated[column] = value
+                    break
+        migrated_rows.append(migrated)
+
+    with open(CSV_FILE, mode="w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=CANONICAL_FIELDNAMES)
+        writer.writeheader()
+        writer.writerows(migrated_rows)
+
+
+def clamp_hand_to_face_ratio(value):
+    if value >= 999.0:
+        return NO_HAND_VISIBLE_RATIO
+    return min(value, NO_HAND_VISIBLE_RATIO)
+
+
+def build_csv_row(fieldnames, metadata, features, label):
+    canonical_values = {name: round(float(features.get(name, 0.0)), 4) for name in FEATURE_ORDER}
+    canonical_values["hand_to_face_ratio"] = round(clamp_hand_to_face_ratio(features["hand_to_face_ratio"]), 4)
+    canonical_values["wrist_elevated"] = int(features["wrist_elevated"])
+    canonical_values["visible_wrist_count"] = int(features.get("visible_wrist_count", 0))
+    canonical_values["hand_visible"] = int(features.get("hand_visible", 0))
+    canonical_values["face_detected"] = int(features.get("face_detected", 0))
+    canonical_values["label"] = label
+    canonical_values.update(metadata)
+    return {name: canonical_values.get(name, "") for name in fieldnames}
 
 def main():
+    csv_fieldnames = get_csv_fieldnames()
+
     mp_pose = mp.solutions.pose
     pose = mp_pose.Pose(static_image_mode=False, min_detection_confidence=0.5, min_tracking_confidence=0.5)
     
@@ -36,6 +88,10 @@ def main():
     is_counting_down = False
     countdown_start_time = 0
     current_label = None
+    session_id = uuid4().hex[:12]
+    capture_group = None
+    frame_index = 0
+    last_saved_at = 0.0
     
     # Đã chỉnh sửa: Chỉ giữ lại 4 nhãn 0, 1, 2, 3
     label_map = {
@@ -74,10 +130,13 @@ def main():
             if is_collecting and current_label == input_label:
                 is_collecting = False
                 current_label = None
+                capture_group = None
             elif not is_collecting and not is_counting_down:
                 current_label = input_label
                 is_counting_down = True
                 countdown_start_time = time.time()
+                capture_group = f"{session_id}_{input_label.replace(' ', '_')}_{int(countdown_start_time)}"
+                last_saved_at = 0.0
 
         # Logic đếm ngược
         if is_counting_down:
@@ -93,29 +152,28 @@ def main():
         # Logic thu thập dữ liệu
         if is_collecting:
             data_to_save = None
+            now = time.time()
             
-            if results.pose_landmarks:
+            if results.pose_landmarks and now - last_saved_at >= COLLECTION_INTERVAL_SEC:
                 landmarks = results.pose_landmarks.landmark
                 face_landmarks = mesh_results.multi_face_landmarks[0] if mesh_results.multi_face_landmarks else None
                 features = classifier.extract_features(landmarks, face_landmarks, w, h)
-                
-                data_to_save = [
-                    round(features['neck_ratio'], 4),
-                    round(features['forward_lean_z'], 4),
-                    round(features['shoulder_tilt_ratio'], 4),
-                    round(features['head_tilt_ratio'], 4),
-                    round(features['hand_to_face_ratio'], 4),
-                    round(features['pose_x'], 4),
-                    round(features['pose_y'], 4),
-                    int(features['wrist_elevated']),
-                    current_label
-                ]
+
+                metadata = {
+                    "session_id": session_id,
+                    "capture_group": capture_group,
+                    "captured_at": round(now, 3),
+                    "frame_index": frame_index,
+                }
+                data_to_save = build_csv_row(csv_fieldnames, metadata, features, current_label)
+                last_saved_at = now
+                frame_index += 1
             
             # Đã xóa phần kiểm tra "Absence" vì nhãn này không còn được sử dụng
 
             if data_to_save:
                 with open(CSV_FILE, mode='a', newline='') as f:
-                    writer = csv.writer(f)
+                    writer = csv.DictWriter(f, fieldnames=csv_fieldnames)
                     writer.writerow(data_to_save)
                 # Chỉ báo đang quay (Recording indicator)
                 cv2.rectangle(frame, (0, 0), (w, h), (0, 0, 255), 10)

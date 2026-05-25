@@ -6,6 +6,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from src.feature_schema import FEATURE_ORDER
+
 ROOT_DIR = Path(__file__).resolve().parent
 MODELS_DIR = ROOT_DIR / "models"
 FRONTEND_MODELS_DIR = ROOT_DIR.parent / "web_app" / "frontend" / "public" / "models"
@@ -69,7 +71,7 @@ def export_posture(model_pkl: Path, output_onnx: Path) -> tuple[int, str, str]:
         options = {type(model): {"zipmap": False}}
         onx = convert_sklearn(
             model,
-            initial_types=[("float_input", FloatTensorType([None, 8]))],
+            initial_types=[("float_input", FloatTensorType([None, len(FEATURE_ORDER)]))],
             options=options,
         )
         output_onnx.write_bytes(onx.SerializeToString())

@@ -5,6 +5,7 @@ import numpy as np
 import joblib
 from collections import deque
 from src.feature_utils import calculate_distance, get_midpoint, estimate_head_pose
+from src.feature_schema import BASE_FEATURE_ORDER, FEATURE_ORDER
 from ultralytics import YOLO
 
 class PostureClassifier:
@@ -44,17 +45,25 @@ class PostureClassifier:
 
     def extract_features(self, landmarks, face_landmarks, w, h):
         """Trích xuất dữ liệu đặc trưng từ các điểm mốc (landmarks)"""
-        nose = self.get_landmark_px(landmarks[self.mp_pose.PoseLandmark.NOSE.value], w, h)
-        l_shoulder = self.get_landmark_px(landmarks[self.mp_pose.PoseLandmark.LEFT_SHOULDER.value], w, h)
-        r_shoulder = self.get_landmark_px(landmarks[self.mp_pose.PoseLandmark.RIGHT_SHOULDER.value], w, h)
-        l_ear = self.get_landmark_px(landmarks[self.mp_pose.PoseLandmark.LEFT_EAR.value], w, h)
-        r_ear = self.get_landmark_px(landmarks[self.mp_pose.PoseLandmark.RIGHT_EAR.value], w, h)
-        l_wrist = self.get_landmark_px(landmarks[self.mp_pose.PoseLandmark.LEFT_WRIST.value], w, h)
-        r_wrist = self.get_landmark_px(landmarks[self.mp_pose.PoseLandmark.RIGHT_WRIST.value], w, h)
+        nose_lm = landmarks[self.mp_pose.PoseLandmark.NOSE.value]
+        l_shoulder_lm = landmarks[self.mp_pose.PoseLandmark.LEFT_SHOULDER.value]
+        r_shoulder_lm = landmarks[self.mp_pose.PoseLandmark.RIGHT_SHOULDER.value]
+        l_ear_lm = landmarks[self.mp_pose.PoseLandmark.LEFT_EAR.value]
+        r_ear_lm = landmarks[self.mp_pose.PoseLandmark.RIGHT_EAR.value]
+        l_wrist_lm = landmarks[self.mp_pose.PoseLandmark.LEFT_WRIST.value]
+        r_wrist_lm = landmarks[self.mp_pose.PoseLandmark.RIGHT_WRIST.value]
 
-        nose_z = landmarks[self.mp_pose.PoseLandmark.NOSE.value].z
-        l_shoulder_z = landmarks[self.mp_pose.PoseLandmark.LEFT_SHOULDER.value].z
-        r_shoulder_z = landmarks[self.mp_pose.PoseLandmark.RIGHT_SHOULDER.value].z
+        nose = self.get_landmark_px(nose_lm, w, h)
+        l_shoulder = self.get_landmark_px(l_shoulder_lm, w, h)
+        r_shoulder = self.get_landmark_px(r_shoulder_lm, w, h)
+        l_ear = self.get_landmark_px(l_ear_lm, w, h)
+        r_ear = self.get_landmark_px(r_ear_lm, w, h)
+        l_wrist = self.get_landmark_px(l_wrist_lm, w, h)
+        r_wrist = self.get_landmark_px(r_wrist_lm, w, h)
+
+        nose_z = nose_lm.z
+        l_shoulder_z = l_shoulder_lm.z
+        r_shoulder_z = r_shoulder_lm.z
         mid_shoulder_z = (l_shoulder_z + r_shoulder_z) / 2
 
         mid_shoulder = get_midpoint(l_shoulder, r_shoulder)
@@ -70,9 +79,11 @@ class PostureClassifier:
         chest_level = mid_shoulder[1] + (shoulder_width * 0.5)
         wrist_elevated = False
         min_hand_to_face = 999.0
+        visible_wrist_count = 0
         
-        for wrist_lm, wrist_px in [(landmarks[15], l_wrist), (landmarks[16], r_wrist)]:
+        for wrist_lm, wrist_px in [(l_wrist_lm, l_wrist), (r_wrist_lm, r_wrist)]:
             if wrist_lm.visibility > 0.2:
+                visible_wrist_count += 1
                 dist_face = min(calculate_distance(wrist_px, l_ear), calculate_distance(wrist_px, nose))
                 min_hand_to_face = min(min_hand_to_face, dist_face / shoulder_width)
                 if wrist_px[1] < chest_level:
@@ -82,6 +93,11 @@ class PostureClassifier:
         if face_landmarks:
             pose_x, pose_y, pose_z = estimate_head_pose(face_landmarks, w, h)
 
+        head_offset_x_ratio = (mid_ear[0] - mid_shoulder[0]) / shoulder_width
+        head_offset_y_ratio = (mid_ear[1] - mid_shoulder[1]) / shoulder_width
+        nose_shoulder_x_ratio = (nose[0] - mid_shoulder[0]) / shoulder_width
+        nose_shoulder_y_ratio = (nose[1] - mid_shoulder[1]) / shoulder_width
+
         return {
             "neck_ratio": neck_ratio,
             "forward_lean_z": forward_lean_z,
@@ -89,23 +105,31 @@ class PostureClassifier:
             "head_tilt_ratio": head_tilt_ratio,
             "hand_to_face_ratio": min_hand_to_face,
             "pose_x": pose_x,
-            "pose_y": pose_y, 
+            "pose_y": pose_y,
             "wrist_elevated": wrist_elevated,
+            "shoulder_width_ratio": shoulder_width / max(float(w), 1.0),
+            "head_offset_x_ratio": head_offset_x_ratio,
+            "head_offset_y_ratio": head_offset_y_ratio,
+            "nose_shoulder_x_ratio": nose_shoulder_x_ratio,
+            "nose_shoulder_y_ratio": nose_shoulder_y_ratio,
+            "abs_pose_x": abs(pose_x),
+            "abs_pose_y": abs(pose_y),
+            "face_detected": 1.0 if face_landmarks else 0.0,
+            "nose_visibility": nose_lm.visibility,
+            "shoulder_visibility_min": min(l_shoulder_lm.visibility, r_shoulder_lm.visibility),
+            "ear_visibility_min": min(l_ear_lm.visibility, r_ear_lm.visibility),
+            "left_wrist_visibility": l_wrist_lm.visibility,
+            "right_wrist_visibility": r_wrist_lm.visibility,
+            "visible_wrist_count": visible_wrist_count,
+            "hand_visible": 1.0 if visible_wrist_count > 0 else 0.0,
             "coords": {"nose": nose, "mid_shoulder": mid_shoulder, "mid_ear": mid_ear}
         }
 
     def _predict_ml(self, features):
         """Dự đoán các tư thế khác bằng mô hình AI"""
-        feature_vector = np.array([[
-            features['neck_ratio'], 
-            features['forward_lean_z'], 
-            features['shoulder_tilt_ratio'], 
-            features['head_tilt_ratio'], 
-            features['hand_to_face_ratio'], 
-            features['pose_x'], 
-            features['pose_y'], 
-            int(features['wrist_elevated'])
-        ]])
+        expected_feature_count = getattr(self.scaler, "n_features_in_", len(FEATURE_ORDER))
+        feature_order = FEATURE_ORDER if expected_feature_count > len(BASE_FEATURE_ORDER) else BASE_FEATURE_ORDER
+        feature_vector = np.array([[features[name] for name in feature_order[:expected_feature_count]]])
 
         scaled_vector = self.scaler.transform(feature_vector)
         prediction = self.model.predict(scaled_vector)
