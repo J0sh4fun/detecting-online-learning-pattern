@@ -1,12 +1,14 @@
 from __future__ import annotations
+from contextlib import asynccontextmanager
 
 import base64
 from datetime import datetime, timezone
 
 import cv2
 import numpy as np
-from fastapi import FastAPI, HTTPException, Query, Response, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, Query, Response, WebSocket, WebSocketDisconnect, Depends
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.security import create_session_token, decode_session_token
@@ -23,12 +25,24 @@ from app.models.schemas import (
     VerifyFrameRequest,
     VerifyFrameResponse,
 )
+from app.core.database import Base, engine, get_db
+from app.routes import auth_routes, history_routes
 from app.services.livekit_auth import build_livekit_token
 from app.services.ml_scoring import get_verification_scorer
 from app.services.room_store import store
+from app.services.auth import get_current_user
+from app.models.models import User, RoomReport
 from app.ws.manager import socket_manager
 
-app = FastAPI(title=settings.api_title)
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    yield
+
+app = FastAPI(title=settings.api_title, lifespan=lifespan)
+app.include_router(auth_routes.router)
+app.include_router(history_routes.router)
 
 app.add_middleware(
     CORSMiddleware,
@@ -94,9 +108,16 @@ def chrome_devtools_probe() -> Response:
 
 
 @app.post("/api/rooms", response_model=RoomConnectionResponse)
-def create_room(payload: CreateRoomRequest) -> RoomConnectionResponse:
-    room = store.create_room(teacher_id=payload.teacher_id, room_name=payload.room_name)
-    participant_id = f"teacher-{payload.teacher_id}"
+async def create_room(
+    payload: CreateRoomRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+) -> RoomConnectionResponse:
+    if current_user.role.value != "teacher":
+        raise HTTPException(status_code=403, detail="Only teachers can create rooms")
+
+    room = await store.create_room(db, teacher_id=current_user.id, room_name=payload.room_name)
+    participant_id = f"teacher-{current_user.username}"
     return RoomConnectionResponse(
         room_code=room.room_code,
         role="teacher",
@@ -111,26 +132,32 @@ def create_room(payload: CreateRoomRequest) -> RoomConnectionResponse:
             participant_id=participant_id,
             role="teacher",
         ),
-        score_ws_url=f"ws://localhost:8000/ws/teacher/{room.room_code}",
+        score_ws_url=f"{settings.livekit_url.replace('http', 'ws')}/ws/teacher/{room.room_code}", # not used by UI
         invitation_link=_build_invitation_link(room.room_code),
         room_name=room.room_name,
-        teacher_id=room.teacher_id,
+        teacher_id=current_user.username,
     )
 
 
 @app.post("/api/rooms/join", response_model=RoomConnectionResponse)
-def join_room(payload: JoinRoomRequest) -> RoomConnectionResponse:
+async def join_room(
+    payload: JoinRoomRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+) -> RoomConnectionResponse:
     room_code = payload.room_code.strip().upper()
-    room = store.get_room(room_code)
+    room = await store.get_room(db, room_code)
     if not room:
         raise _room_not_found(room_code)
 
-    student_id = payload.student_id.strip()
+    if current_user.role.value != "student":
+        raise HTTPException(status_code=403, detail="Only students can join rooms")
+
     try:
-        store.ensure_student(room_code=room_code, student_id=student_id)
+        await store.ensure_student(db, room_id=room.id, user_id=current_user.id, display_id=current_user.username)
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
-    participant_id = f"student-{student_id}"
+    participant_id = f"student-{current_user.username}"
     return RoomConnectionResponse(
         room_code=room_code,
         role="student",
@@ -145,9 +172,9 @@ def join_room(payload: JoinRoomRequest) -> RoomConnectionResponse:
             participant_id=participant_id,
             role="student",
         ),
-        score_ws_url=f"ws://localhost:8000/ws/student/{room_code}/{student_id}",
+        score_ws_url=f"ws://localhost:8000/ws/student/{room_code}/{current_user.username}",
         room_name=room.room_name,
-        teacher_id=room.teacher_id,
+        teacher_id=room.teacher.username,
     )
 
 
@@ -156,9 +183,11 @@ async def teacher_scores_socket(
     websocket: WebSocket,
     room_code: str,
     token: str = Query(...),
+    db: AsyncSession = Depends(get_db),
 ) -> None:
     room_code = room_code.strip().upper()
-    if not store.get_room(room_code):
+    room = await store.get_room(db, room_code)
+    if not room:
         await websocket.close(code=4404, reason="Room not found")
         return
 
@@ -177,36 +206,46 @@ async def teacher_scores_socket(
 
 
 @app.websocket("/ws/student/{room_code}/{student_id}")
-async def student_scores_socket(websocket: WebSocket, room_code: str, student_id: str) -> None:
+async def student_scores_socket(
+    websocket: WebSocket, 
+    room_code: str, 
+    student_id: str,
+    token: str = Query(None), # Need token on connection query or message
+    db: AsyncSession = Depends(get_db),
+) -> None:
     room_code = room_code.strip().upper()
     student_id = student_id.strip()
 
-    if not store.get_room(room_code):
+    room = await store.get_room(db, room_code)
+    if not room:
         await websocket.close(code=4404, reason="Room not found")
-        return
-
-    try:
-        store.ensure_student(room_code=room_code, student_id=student_id)
-    except ValueError:
-        await websocket.close(code=4409, reason="Room is full")
         return
 
     await websocket.accept()
     await socket_manager.connect_student(room_code, student_id, websocket)
     await socket_manager.broadcast_snapshot(room_code)
 
+    user_id = None
     try:
         while True:
-            data = StudentScoreIngest.model_validate(await websocket.receive_json())
-            _validate_socket_identity(
-                token=data.token,
+            data_json = await websocket.receive_json()
+            data = StudentScoreIngest.model_validate(data_json)
+            
+            claims = decode_session_token(data.token)
+            if claims.get("role") != "student" or claims.get("room_code") != room_code:
+                raise ValueError("Invalid student token")
+                
+            from sqlalchemy import select
+            res = await db.execute(select(User).filter(User.username == student_id))
+            user = res.scalar_one_or_none()
+            if not user:
+                raise ValueError("User not found")
+
+            await store.update_student_score(
+                db,
                 room_code=room_code,
-                role="student",
-                participant_id=f"student-{student_id}",
-            )
-            store.update_student_score(
-                room_code=room_code,
-                student_id=student_id,
+                user_id=user.id,
+                display_id=student_id,
                 average_score=data.average_score,
                 status=data.status,
                 camera_on=data.camera_on,
@@ -215,10 +254,15 @@ async def student_scores_socket(websocket: WebSocket, room_code: str, student_id
             await socket_manager.broadcast_snapshot(room_code)
     except WebSocketDisconnect:
         socket_manager.disconnect_student(room_code, student_id)
-        student = store.ensure_student(room_code=room_code, student_id=student_id)
-        student.camera_on = False
-        student.status = "Camera Off"
-        student.last_update = datetime.now(timezone.utc)
+        if user_id:
+            res = await db.execute(select(User).filter(User.username == student_id))
+            user = res.scalar_one_or_none()
+            if user:
+                # Update status to offline
+                await store.update_student_score(
+                    db, room_code=room_code, user_id=user.id, display_id=student_id,
+                    average_score=100.0, status="Camera Off", camera_on=False, client_sent_at=datetime.now(timezone.utc).timestamp()
+                )
         await socket_manager.broadcast_snapshot(room_code)
     except Exception:
         socket_manager.disconnect_student(room_code, student_id)
@@ -226,11 +270,12 @@ async def student_scores_socket(websocket: WebSocket, room_code: str, student_id
 
 
 @app.post("/api/verify/frame", response_model=VerifyFrameResponse)
-def verify_frame(payload: VerifyFrameRequest) -> VerifyFrameResponse:
+async def verify_frame(payload: VerifyFrameRequest, db: AsyncSession = Depends(get_db)) -> VerifyFrameResponse:
     claims = decode_session_token(payload.token)
     if claims.get("role") != "student":
         raise HTTPException(status_code=403, detail="Only student tokens can verify frame")
-    if claims.get("room_code") != payload.room_code.strip().upper():
+    room_code = payload.room_code.strip().upper()
+    if claims.get("room_code") != room_code:
         raise HTTPException(status_code=403, detail="Token room mismatch")
 
     try:
@@ -246,17 +291,22 @@ def verify_frame(payload: VerifyFrameRequest) -> VerifyFrameResponse:
     is_flagged = discrepancy >= settings.verify_discrepancy_threshold
 
     if is_flagged:
-        store.add_verification_flag(
-            payload.room_code.strip().upper(),
-            {
-                "student_id": payload.student_id,
-                "client_score": payload.client_score,
-                "server_score": server.score,
-                "server_status": server.status,
-                "discrepancy": discrepancy,
-                "created_at": datetime.now(timezone.utc).isoformat(),
-            },
-        )
+        from sqlalchemy import select
+        res = await db.execute(select(User).filter(User.username == payload.student_id))
+        user = res.scalar_one_or_none()
+        room = await store.get_room(db, room_code)
+        if user and room:
+            await store.add_verification_flag(
+                db,
+                room_id=room.id,
+                user_id=user.id,
+                payload={
+                    "client_score": payload.client_score,
+                    "server_score": server.score,
+                    "server_status": server.status,
+                    "discrepancy": discrepancy,
+                },
+            )
 
     return VerifyFrameResponse(
         is_flagged=is_flagged,
@@ -291,54 +341,108 @@ def score_frame(payload: ScoreFrameRequest) -> ScoreFrameResponse:
 
 
 @app.post("/api/rooms/{room_code}/end", response_model=RoomReportResponse)
-async def end_room(room_code: str, token: str = Query(...)) -> RoomReportResponse:
+async def end_room(
+    room_code: str, 
+    token: str = Query(...), 
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+) -> RoomReportResponse:
     room_code = room_code.strip().upper()
-    room = store.get_room(room_code)
+    room = await store.get_room(db, room_code)
     if not room:
         raise _room_not_found(room_code)
+
+    if current_user.id != room.teacher_id:
+        raise HTTPException(status_code=403, detail="Only the room teacher can end it")
 
     claims = decode_session_token(token)
     if claims.get("role") != "teacher" or claims.get("room_code") != room_code:
         raise HTTPException(status_code=403, detail="Invalid teacher token")
 
-    store.end_room(room_code)
+    # Generate report before ending
+    report = await get_room_report(room_code, token, db, current_user)
+
+    await store.end_room(db, room_code)
     await socket_manager.broadcast_to_students(
-        room_code, {"type": "room_closed", "teacher_id": room.teacher_id}
+        room_code, {"type": "room_closed", "teacher_id": current_user.username}
     )
-    return get_room_report(room_code, token)
+
+    # Save report to DB
+    db_report = RoomReport(
+        room_id=room.id,
+        class_average_score=report.class_average_score,
+        total_students=len(report.students),
+        student_summaries=report.model_dump(mode="json")["students"],
+    )
+    db.add(db_report)
+    await db.commit()
+
+    return report
 
 
 @app.get("/api/rooms/{room_code}/report", response_model=RoomReportResponse)
-def get_room_report(room_code: str, token: str = Query(...)) -> RoomReportResponse:
+async def get_room_report(
+    room_code: str, 
+    token: str = Query(...), 
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+) -> RoomReportResponse:
     room_code = room_code.strip().upper()
-    room = store.get_room(room_code)
+    room = await store.get_room(db, room_code)
     if not room:
         raise _room_not_found(room_code)
+
+    if current_user.id != room.teacher_id:
+        raise HTTPException(status_code=403, detail="Only the room teacher can view report")
 
     claims = decode_session_token(token)
     if claims.get("role") != "teacher" or claims.get("room_code") != room_code:
         raise HTTPException(status_code=403, detail="Invalid teacher token")
 
+    # Check if report already generated
+    from sqlalchemy import select
+    res = await db.execute(select(RoomReport).filter(RoomReport.room_id == room.id))
+    saved_report = res.scalar_one_or_none()
+    if saved_report:
+        return RoomReportResponse(
+            room_code=room_code,
+            room_name=room.room_name,
+            teacher_id=current_user.username,
+            generated_at=saved_report.generated_at.replace(tzinfo=timezone.utc),
+            class_average_score=saved_report.class_average_score,
+            students=saved_report.student_summaries,
+        )
+
+    # Generate live report from DB
+    from app.models.models import RoomParticipant, FocusScore
+    from sqlalchemy.orm import selectinload
+
+    part_res = await db.execute(
+        select(RoomParticipant).filter(RoomParticipant.room_id == room.id, RoomParticipant.role == "student").options(selectinload(RoomParticipant.scores))
+    )
+    participants = part_res.scalars().all()
+
     reports: list[StudentReport] = []
-    room_students = store.snapshot_students(room_code)
     class_total = 0.0
-    for student in room_students:
-        samples = list(store.timeline[room_code][student.student_id])
+    for participant in participants:
+        samples = participant.scores
+        samples.sort(key=lambda s: s.recorded_at)
+        
         avg = (
             sum(sample.score for sample in samples) / len(samples)
             if samples
-            else student.score
+            else participant.current_score
         )
         class_total += avg
         reports.append(
             StudentReport(
-                student_id=student.student_id,
+                student_id=participant.display_id,
                 average_score=round(avg, 2),
                 timeline=[
                     StudentTimelinePoint(
-                        timestamp=sample.timestamp,
+                        timestamp=sample.recorded_at.replace(tzinfo=timezone.utc),
                         score=sample.score,
-                        status=sample.status,
+                        status=sample.status_label,
                         camera_on=sample.camera_on,
                     )
                     for sample in samples
@@ -346,11 +450,11 @@ def get_room_report(room_code: str, token: str = Query(...)) -> RoomReportRespon
             )
         )
 
-    class_avg = round(class_total / len(room_students), 2) if room_students else 0.0
+    class_avg = round(class_total / len(participants), 2) if participants else 0.0
     return RoomReportResponse(
         room_code=room_code,
         room_name=room.room_name,
-        teacher_id=room.teacher_id,
+        teacher_id=current_user.username,
         generated_at=datetime.now(timezone.utc),
         class_average_score=class_avg,
         students=reports,
