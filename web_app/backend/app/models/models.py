@@ -1,0 +1,126 @@
+from __future__ import annotations
+
+import enum
+from datetime import datetime
+from typing import Any
+
+from sqlalchemy import Boolean, Column, DateTime, Enum, Float, ForeignKey, Integer, String
+from sqlalchemy.dialects.mysql import JSON
+from sqlalchemy.orm import relationship
+from sqlalchemy.sql import func
+
+from app.core.database import Base
+
+
+class RoleEnum(str, enum.Enum):
+    teacher = "teacher"
+    student = "student"
+
+
+class RoomStatusEnum(str, enum.Enum):
+    active = "active"
+    ended = "ended"
+
+
+class User(Base):
+    __tablename__ = "users"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    username = Column(String(64), unique=True, nullable=False, index=True)
+    password_hash = Column(String(255), nullable=False)
+    role = Column(Enum(RoleEnum), nullable=False)
+    created_at = Column(DateTime, default=func.now(), nullable=False)
+
+    rooms = relationship("Room", back_populates="teacher", cascade="all, delete")
+    participations = relationship("RoomParticipant", back_populates="user", cascade="all, delete")
+
+
+class Room(Base):
+    __tablename__ = "rooms"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    room_code = Column(String(12), unique=True, nullable=False, index=True)
+    room_name = Column(String(120), nullable=False)
+    teacher_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    max_students = Column(Integer, default=20, nullable=False)
+    status = Column(Enum(RoomStatusEnum), default=RoomStatusEnum.active, nullable=False)
+    created_at = Column(DateTime, default=func.now(), nullable=False)
+    ended_at = Column(DateTime, nullable=True)
+
+    teacher = relationship("User", back_populates="rooms")
+    participants = relationship("RoomParticipant", back_populates="room", cascade="all, delete")
+    scores = relationship("FocusScore", back_populates="room", cascade="all, delete")
+    verification_flags = relationship("VerificationFlag", back_populates="room", cascade="all, delete")
+    report = relationship("RoomReport", back_populates="room", uselist=False, cascade="all, delete")
+
+
+class RoomParticipant(Base):
+    __tablename__ = "room_participants"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    room_id = Column(Integer, ForeignKey("rooms.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    display_id = Column(String(64), nullable=False)
+    role = Column(Enum(RoleEnum), nullable=False)
+    camera_on = Column(Boolean, default=True, nullable=False)
+    current_score = Column(Float, default=100.0, nullable=False)
+    current_status = Column(String(80), default="Waiting", nullable=False)
+    joined_at = Column(DateTime, default=func.now(), nullable=False)
+    left_at = Column(DateTime, nullable=True)
+    last_score_update = Column(DateTime, nullable=True)
+    last_ingest_epoch = Column(Float, default=0.0, nullable=False)
+
+    room = relationship("Room", back_populates="participants")
+    user = relationship("User", back_populates="participations")
+    scores = relationship("FocusScore", back_populates="participant", cascade="all, delete")
+    verification_flags = relationship("VerificationFlag", back_populates="participant", cascade="all, delete")
+
+    @property
+    def is_warning(self) -> bool:
+        # Assuming threshold of 55
+        return (not self.camera_on) or self.current_score <= 55.0
+
+
+class FocusScore(Base):
+    __tablename__ = "focus_scores"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    participant_id = Column(Integer, ForeignKey("room_participants.id", ondelete="CASCADE"), nullable=False, index=True)
+    room_id = Column(Integer, ForeignKey("rooms.id", ondelete="CASCADE"), nullable=False, index=True)
+    score = Column(Float, nullable=False)
+    status_label = Column(String(80), nullable=False)
+    camera_on = Column(Boolean, nullable=False)
+    recorded_at = Column(DateTime, default=func.now(), nullable=False, index=True)
+
+    participant = relationship("RoomParticipant", back_populates="scores")
+    room = relationship("Room", back_populates="scores")
+
+
+class VerificationFlag(Base):
+    __tablename__ = "verification_flags"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    participant_id = Column(Integer, ForeignKey("room_participants.id", ondelete="CASCADE"), nullable=False, index=True)
+    room_id = Column(Integer, ForeignKey("rooms.id", ondelete="CASCADE"), nullable=False, index=True)
+    client_score = Column(Float, nullable=False)
+    server_score = Column(Float, nullable=False)
+    server_status = Column(String(80), nullable=False)
+    discrepancy = Column(Float, nullable=False)
+    resolved = Column(Boolean, default=False, nullable=False)
+    created_at = Column(DateTime, default=func.now(), nullable=False)
+
+    participant = relationship("RoomParticipant", back_populates="verification_flags")
+    room = relationship("Room", back_populates="verification_flags")
+
+
+class RoomReport(Base):
+    __tablename__ = "room_reports"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    room_id = Column(Integer, ForeignKey("rooms.id", ondelete="CASCADE"), unique=True, nullable=False, index=True)
+    class_average_score = Column(Float, nullable=False)
+    total_students = Column(Integer, nullable=False)
+    student_summaries = Column(JSON, nullable=False)
+    generated_at = Column(DateTime, default=func.now(), nullable=False)
+
+    room = relationship("Room", back_populates="report")

@@ -29,6 +29,7 @@ class Settings:
     min_ingest_interval_sec: float = float(os.getenv("MIN_INGEST_INTERVAL_SEC", "0.75"))
     score_low_threshold: float = float(os.getenv("SCORE_LOW_THRESHOLD", "55"))
     verify_discrepancy_threshold: float = float(os.getenv("VERIFY_DISCREPANCY_THRESHOLD", "25"))
+    database_url: str = os.getenv("DATABASE_URL", "mysql+aiomysql://root:focusdev@localhost:3306/focus_classroom")
 
     @property
     def project_root(self) -> Path:
