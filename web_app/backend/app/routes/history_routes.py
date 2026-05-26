@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
@@ -8,12 +8,86 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.core.database import get_db
-from app.models.models import Room, RoomStatusEnum, User
-from app.models.schemas import RoomHistoryItem, RoomHistoryListResponse, RoomReportResponse
+from app.models.models import Room, RoomParticipant, RoomReport, RoomStatusEnum, User
+from app.models.schemas import RoomHistoryItem, RoomHistoryListResponse, RoomReportResponse, StudentReport, StudentTimelinePoint
 from app.services.auth import get_current_user
-from app.services.room_store import store
 
 router = APIRouter(prefix="/api/history", tags=["history"])
+
+
+def as_utc(value: datetime) -> datetime:
+    if value.tzinfo:
+        return value.astimezone(timezone.utc)
+    return value.replace(tzinfo=timezone.utc)
+
+
+def build_report_response(room: Room, teacher_name: str, generated_at: datetime) -> RoomReportResponse:
+    reports: list[StudentReport] = []
+    class_total = 0.0
+
+    participants = [
+        participant
+        for participant in room.participants
+        if participant.role.value == "student"
+    ]
+
+    for participant in sorted(participants, key=lambda item: item.display_id.lower()):
+        samples = sorted(participant.scores, key=lambda sample: sample.recorded_at)
+        avg = (
+            sum(sample.score for sample in samples) / len(samples)
+            if samples
+            else participant.current_score
+        )
+        class_total += avg
+        reports.append(
+            StudentReport(
+                student_id=participant.display_id,
+                average_score=round(avg, 2),
+                timeline=[
+                    StudentTimelinePoint(
+                        timestamp=as_utc(sample.recorded_at),
+                        score=sample.score,
+                        status=sample.status_label,
+                        camera_on=sample.camera_on,
+                    )
+                    for sample in samples
+                ],
+            )
+        )
+
+    class_avg = round(class_total / len(participants), 2) if participants else 0.0
+    return RoomReportResponse(
+        room_code=room.room_code,
+        room_name=room.room_name,
+        teacher_id=teacher_name,
+        generated_at=as_utc(generated_at),
+        class_average_score=class_avg,
+        students=reports,
+    )
+
+
+async def ensure_saved_report(db: AsyncSession, room: Room, teacher_name: str) -> RoomReportResponse:
+    if room.report:
+        return RoomReportResponse(
+            room_code=room.room_code,
+            room_name=room.room_name,
+            teacher_id=teacher_name,
+            generated_at=as_utc(room.report.generated_at),
+            class_average_score=room.report.class_average_score,
+            students=room.report.student_summaries,
+        )
+
+    report = build_report_response(room, teacher_name, datetime.now(timezone.utc))
+    if room.status == RoomStatusEnum.ended:
+        db_report = RoomReport(
+            room_id=room.id,
+            class_average_score=report.class_average_score,
+            total_students=len(report.students),
+            student_summaries=report.model_dump(mode="json")["students"],
+        )
+        db.add(db_report)
+        await db.commit()
+    return report
 
 @router.get("/rooms", response_model=RoomHistoryListResponse)
 async def get_rooms_history(
@@ -65,7 +139,12 @@ async def get_history_report(
 
     room_code = room_code.strip().upper()
     res = await db.execute(
-        select(Room).options(selectinload(Room.report)).filter(Room.room_code == room_code)
+        select(Room)
+        .options(
+            selectinload(Room.report),
+            selectinload(Room.participants).selectinload(RoomParticipant.scores),
+        )
+        .filter(Room.room_code == room_code)
     )
     room = res.scalar_one_or_none()
     if not room:
@@ -74,18 +153,4 @@ async def get_history_report(
     if room.teacher_id != current_user.id:
         raise HTTPException(status_code=403, detail="Not authorized to view this room's report")
     
-    if not room.report:
-        raise HTTPException(status_code=404, detail="Report not generated for this room yet")
-
-    # In auth context, timezone handling is slightly tricky. The DB stores naïve UTC times by default depending on driver.
-    # RoomReportResponse expects generated_at as datetime (Pydantic will serialize to ISO).
-    from datetime import timezone
-    
-    return RoomReportResponse(
-        room_code=room.room_code,
-        room_name=room.room_name,
-        teacher_id=current_user.username,
-        generated_at=room.report.generated_at.replace(tzinfo=timezone.utc),
-        class_average_score=room.report.class_average_score,
-        students=room.report.student_summaries,
-    )
+    return await ensure_saved_report(db, room, current_user.username)
