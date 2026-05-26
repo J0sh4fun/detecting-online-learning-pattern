@@ -20,8 +20,8 @@ from src.feature_schema import (
 
 ROOT_DIR = Path(__file__).resolve().parent
 DEFAULT_DATASETS = [
-    ROOT_DIR / "data" / "posture_dataset.csv",
-    ROOT_DIR / "data" / "test.csv",
+    ROOT_DIR / "data" / "posture_dataset_train.csv",
+    ROOT_DIR / "data" / "posture_dataset_test.csv",
 ]
 
 LABELS_TO_REMOVE = {"Absence", "Using Phone"}

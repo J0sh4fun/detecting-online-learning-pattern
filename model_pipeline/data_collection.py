@@ -10,7 +10,7 @@ from src.feature_schema import FEATURE_ALIASES, FEATURE_ORDER, METADATA_COLUMNS,
 
 # Đường dẫn tệp CSV
 DATA_DIR = "data"
-CSV_FILE = os.path.join(DATA_DIR, "posture_dataset.csv")
+CSV_FILE = os.path.join(DATA_DIR, "posture_dataset_train.csv")
 COLLECTION_INTERVAL_SEC = 0.25
 CANONICAL_FIELDNAMES = OUTPUT_COLUMNS
 LEGACY_COLUMN_ALIASES = {**FEATURE_ALIASES, "label": ["label"]}
