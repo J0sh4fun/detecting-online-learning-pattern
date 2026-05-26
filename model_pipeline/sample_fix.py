@@ -20,8 +20,8 @@ from src.feature_schema import (
 
 ROOT_DIR = Path(__file__).resolve().parent
 DEFAULT_DATASETS = [
-    ROOT_DIR / "data" / "posture_dataset.csv",
-    ROOT_DIR / "data" / "test.csv",
+    ROOT_DIR / "data" / "posture_dataset_train.csv",
+    ROOT_DIR / "data" / "posture_dataset_test.csv",
 ]
 
 LABELS_TO_REMOVE = {"Absence", "Using Phone"}
@@ -183,7 +183,7 @@ def main() -> None:
         nargs="*",
         type=Path,
         default=DEFAULT_DATASETS,
-        help="CSV files to clean. Defaults to data/posture_dataset.csv and data/test.csv.",
+        help="CSV files to clean. Defaults to data/posture_dataset_train.csv and data/posture_dataset_test.csv.",
     )
     parser.add_argument(
         "--near-duplicate-radius",
