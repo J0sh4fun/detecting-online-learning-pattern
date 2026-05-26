@@ -116,6 +116,7 @@ def evaluate_external_test(best_name: str, pipeline, X_train, y_train, X_test, y
     print(f"f1_macro:          {test_f1:.4f}")
     print(f"balanced_accuracy: {test_bal_acc:.4f}")
     print(f"label_encoded_r2:  {test_r2:.4f}")
+    print(f"R2 label mapping:  {r2_label_mapping}")
     print(f"train/test f1 gap: {train_f1 - test_f1:.4f}")
     print("\nClassification report:")
     print(classification_report(y_test, y_test_pred, digits=4, zero_division=0))
