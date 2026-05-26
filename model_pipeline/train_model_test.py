@@ -128,7 +128,7 @@ def save_artifacts(pipeline, output_dir: Path) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(
         description=(
-            "Train on posture_dataset.csv and evaluate on test.csv from a different person. "
+            "Train on posture_dataset_train.csv and evaluate on posture_dataset_test.csv from a different person. "
             "Use sample_fix.py first if either CSV still contains duplicate/legacy rows."
         )
     )
