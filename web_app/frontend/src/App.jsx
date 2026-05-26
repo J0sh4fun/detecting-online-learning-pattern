@@ -5,10 +5,12 @@ import StudentRoom from './pages/StudentRoom';
 import LoginPage from './pages/LoginPage';
 import RegisterPage from './pages/RegisterPage';
 import ClassHistory from './pages/ClassHistory';
+import HistoryReportPage from './pages/HistoryReportPage';
 import { createRoom, joinRoom } from './lib/api';
 import { saveSession } from './lib/sessionStore';
 import { AuthProvider, useAuth } from './lib/AuthContext';
 import ProtectedRoute from './lib/ProtectedRoute';
+import { CalendarClock, LogOut, Plus, Video } from 'lucide-react';
 import './index.css';
 
 function Home() {
@@ -55,58 +57,105 @@ function Home() {
   }
 
   return (
-    <main className="home-layout">
-      <header className="app-header panel" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
-        <div>
-          <span className="bold">AI Focus Classroom</span>
-          <span className="muted" style={{ marginLeft: '1rem', borderLeft: '1px solid rgba(255,255,255,0.1)', paddingLeft: '1rem' }}>
-            Logged in as {user?.username} ({user?.role})
-          </span>
+    <main className="zoom-shell">
+      <header className="zoom-nav">
+        <div className="brand-lockup">
+          <span className="brand-mark">AI</span>
+          <div>
+            <div className="brand-title">AI Focus Classroom</div>
+            <div className="brand-subtitle">Logged in as {user?.username} ({user?.role})</div>
+          </div>
         </div>
-        <div style={{ display: 'flex', gap: '1rem' }}>
+        <div className="nav-actions">
           {user?.role === 'teacher' && (
-            <button onClick={() => navigate('/history')} className="secondary-button" style={{ background: 'rgba(255,255,255,0.1)' }}>
+            <button onClick={() => navigate('/history')} className="secondary-button">
+              <CalendarClock size={17} />
               Class History
             </button>
           )}
-          <button onClick={logout} className="secondary-button" style={{ background: 'rgba(239, 68, 68, 0.2)', color: '#f87171' }}>
+          <button onClick={logout} className="danger-button">
+            <LogOut size={17} />
             Sign Out
           </button>
         </div>
       </header>
 
-      <section className="panel">
-        <h1>Welcome, {user?.username}!</h1>
-        <p className="muted">Select an action below based on your role.</p>
-        {error && <p className="error-text">{error}</p>}
-      </section>
+      <section className="home-layout">
+        <div className="panel home-hero">
+          <div className="hero-copy">
+            <span className="eyebrow"><Video size={16} /> Live classroom focus monitoring</span>
+            <h1>Bring class video and attention signals into one clean workspace.</h1>
+            <p>
+              Host monitored sessions, invite students, and review focus reports from a familiar meeting-first interface.
+            </p>
+            <div className="hero-actions">
+              {user?.role === 'teacher' && (
+                <button type="button" onClick={() => document.getElementById('roomNameInput')?.focus()}>
+                  <Plus size={18} />
+                  New classroom
+                </button>
+              )}
+              {user?.role === 'student' && (
+                <button type="button" onClick={() => document.getElementById('roomCodeInput')?.focus()}>
+                  <Video size={18} />
+                  Join classroom
+                </button>
+              )}
+              {user?.role === 'teacher' && (
+                <button type="button" className="secondary-button" onClick={() => navigate('/history')}>
+                  <CalendarClock size={18} />
+                  View history
+                </button>
+              )}
+            </div>
+          </div>
 
-      <section className="forms-layout" style={{ marginTop: '1.5rem' }}>
-        {user?.role === 'teacher' ? (
-          <form className="panel form-panel" onSubmit={handleCreateRoom}>
-            <h2>Host a Class</h2>
-            <input
-              value={roomName}
-              onChange={(event) => setRoomName(event.target.value)}
-              placeholder="Room name"
-              required
-            />
-            <button disabled={loading} type="submit">Create classroom</button>
-          </form>
-        ) : (
-          <form className="panel form-panel" onSubmit={handleJoinRoom}>
-            <h2>Join a Class</h2>
-            <input
-              value={roomCode}
-              onChange={(event) => setRoomCode(event.target.value.toUpperCase())}
-              placeholder="Room code"
-              required
-            />
-            <button disabled={loading} type="submit">
-              {inviteMode ? 'Join invited room' : 'Join classroom'}
-            </button>
-          </form>
-        )}
+          <aside className="meeting-panel">
+            <div className="meeting-preview">
+              <div className="preview-video">
+                <span className="preview-chip">AI Focus Classroom</span>
+              </div>
+            </div>
+            {error && <p className="error-text">{error}</p>}
+            {user?.role === 'teacher' ? (
+              <form className="form-panel" onSubmit={handleCreateRoom}>
+                <div>
+                  <h2>Host a class</h2>
+                  <p className="muted">Create a room and share the invite code with students.</p>
+                </div>
+                <input
+                  id="roomNameInput"
+                  value={roomName}
+                  onChange={(event) => setRoomName(event.target.value)}
+                  placeholder="Room name"
+                  required
+                />
+                <button disabled={loading} type="submit">
+                  <Plus size={18} />
+                  {loading ? 'Creating...' : 'Create classroom'}
+                </button>
+              </form>
+            ) : (
+              <form className="form-panel" onSubmit={handleJoinRoom}>
+                <div>
+                  <h2>Join a class</h2>
+                  <p className="muted">Enter the room code provided by your teacher.</p>
+                </div>
+                <input
+                  id="roomCodeInput"
+                  value={roomCode}
+                  onChange={(event) => setRoomCode(event.target.value.toUpperCase())}
+                  placeholder="Room code"
+                  required
+                />
+                <button disabled={loading} type="submit">
+                  <Video size={18} />
+                  {loading ? 'Joining...' : inviteMode ? 'Join invited room' : 'Join classroom'}
+                </button>
+              </form>
+            )}
+          </aside>
+        </div>
       </section>
     </main>
   );
@@ -141,6 +190,12 @@ function MainApp() {
       <Route path="/history" element={
         <ProtectedRoute requiredRole="teacher">
           <ClassHistory />
+        </ProtectedRoute>
+      } />
+
+      <Route path="/history/:roomCode/report" element={
+        <ProtectedRoute requiredRole="teacher">
+          <HistoryReportPage />
         </ProtectedRoute>
       } />
     </Routes>

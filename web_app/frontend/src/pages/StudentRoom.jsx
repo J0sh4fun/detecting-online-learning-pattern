@@ -254,11 +254,13 @@ export default function StudentRoom() {
 
   return (
     <main className="student-layout">
-      <header className="panel">
-        <h1>Classroom {roomId}</h1>
-        <p className="muted">
-          Connected as <strong>{studentId}</strong>. AI processing runs in the background.
-        </p>
+      <header className="class-header panel">
+        <div>
+          <h1>Classroom {roomId}</h1>
+          <p className="muted">
+            Connected as <strong>{studentId}</strong>. AI processing runs in the background.
+          </p>
+        </div>
         {error && <p className="error-text">{error}</p>}
       </header>
 
@@ -284,7 +286,7 @@ export default function StudentRoom() {
             <h2 className="error-text">Room Closed</h2>
             <p><strong>{roomClosedData.teacherName}</strong> has closed the classroom.</p>
             <p className="muted">The session has ended and scoring has stopped.</p>
-            <button className="primary-button mt-4" onClick={() => navigate('/')}>
+            <button className="mt-4" onClick={() => navigate('/')}>
               Return to main screen
             </button>
           </div>

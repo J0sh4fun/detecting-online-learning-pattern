@@ -32,66 +32,79 @@ export default function RegisterPage() {
   };
 
   return (
-    <main className="screen-center animate-in">
-      <div className="panel auth-panel">
-        <h1 className="text-center" style={{ marginBottom: '0.5rem' }}>Create Account</h1>
-        <p className="text-center muted" style={{ marginBottom: '2rem' }}>Join AI Focus Classroom today</p>
-        
-        {error && <p className="error-text text-center">{error}</p>}
-        
-        <form onSubmit={handleSubmit} className="auth-form">
-          <div className="role-picker">
-            <button 
-              type="button" 
-              className={`role-option ${role === 'student' ? 'active' : ''}`}
-              onClick={() => setRole('student')}
-            >
-              <div className="role-title">Student</div>
-              <div className="text-sm muted">Join classes</div>
-            </button>
-            <button 
-              type="button" 
-              className={`role-option ${role === 'teacher' ? 'active' : ''}`}
-              onClick={() => setRole('teacher')}
-            >
-              <div className="role-title">Teacher</div>
-              <div className="text-sm muted">Host classes</div>
-            </button>
+    <main className="auth-shell animate-in">
+      <section className="auth-visual">
+        <div className="brand-lockup">
+          <span className="brand-mark">AI</span>
+          <div>
+            <div className="brand-title">AI Focus Classroom</div>
+            <div className="brand-subtitle" style={{ color: 'rgba(255,255,255,0.76)' }}>Video learning workspace</div>
           </div>
-
-          <div className="form-group">
-            <label>Username</label>
-            <input 
-              type="text" 
-              value={username} 
-              onChange={(e) => setUsername(e.target.value)} 
-              required 
-              placeholder="Choose a username"
-              minLength={2}
-            />
-          </div>
-          <div className="form-group">
-            <label>Password</label>
-            <input 
-              type="password" 
-              value={password} 
-              onChange={(e) => setPassword(e.target.value)} 
-              required 
-              placeholder="At least 6 characters"
-              minLength={6}
-            />
-          </div>
-          
-          <button type="submit" disabled={loading} style={{ width: '100%', marginTop: '1rem' }}>
-            {loading ? 'Creating account...' : 'Create Account'}
-          </button>
-        </form>
-        
-        <div className="text-center mt-4 text-sm">
-          <span className="muted">Already have an account? </span>
-          <Link to="/login" style={{ color: 'var(--primary)' }}>Sign in</Link>
         </div>
-      </div>
+        <h1>Start a classroom designed for live focus monitoring.</h1>
+      </section>
+
+      <section className="auth-side">
+        <div className="panel auth-panel">
+          <h1 className="text-center" style={{ marginBottom: '0.5rem' }}>Create account</h1>
+          <p className="text-center muted" style={{ marginBottom: '2rem' }}>Choose a role and continue to your workspace.</p>
+        
+          {error && <p className="error-text text-center">{error}</p>}
+        
+          <form onSubmit={handleSubmit} className="auth-form">
+            <div className="role-picker">
+              <button 
+                type="button" 
+                className={`role-option ${role === 'student' ? 'active' : ''}`}
+                onClick={() => setRole('student')}
+              >
+                <div className="role-title">Student</div>
+                <div className="text-sm muted">Join classes</div>
+              </button>
+              <button 
+                type="button" 
+                className={`role-option ${role === 'teacher' ? 'active' : ''}`}
+                onClick={() => setRole('teacher')}
+              >
+                <div className="role-title">Teacher</div>
+                <div className="text-sm muted">Host classes</div>
+              </button>
+            </div>
+
+            <div className="form-group">
+              <label>Username</label>
+              <input 
+                type="text" 
+                value={username} 
+                onChange={(e) => setUsername(e.target.value)} 
+                required 
+                placeholder="Choose a username"
+                minLength={2}
+              />
+            </div>
+            <div className="form-group">
+              <label>Password</label>
+              <input 
+                type="password" 
+                value={password} 
+                onChange={(e) => setPassword(e.target.value)} 
+                required 
+                placeholder="At least 6 characters"
+                minLength={6}
+              />
+            </div>
+          
+            <button type="submit" disabled={loading} style={{ width: '100%', marginTop: '1rem' }}>
+              {loading ? 'Creating account...' : 'Create account'}
+            </button>
+          </form>
+        
+          <div className="text-center mt-4 text-sm">
+            <span className="muted">Already have an account? </span>
+            <Link to="/login">Sign in</Link>
+          </div>
+        </div>
+      </section>
     </main>
   );
 }

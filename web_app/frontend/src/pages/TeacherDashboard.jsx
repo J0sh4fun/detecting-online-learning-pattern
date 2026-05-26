@@ -334,7 +334,7 @@ export default function TeacherDashboard() {
             Room <strong>{roomId}</strong> | Invite: <code>{session.invitation_link}</code>
           </p>
         </div>
-        <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
+        <div className="header-actions">
           <button onClick={handleEndClass}>End class and report</button>
         </div>
       </header>
@@ -359,7 +359,7 @@ export default function TeacherDashboard() {
       </LiveKitRoom>
 
       {report && (
-        <div className="report-overlay" style={{ position: 'fixed', inset: 0, zIndex: 100, background: 'var(--bg)', overflowY: 'auto', padding: '1.5rem' }}>
+        <div className="report-overlay">
           <ReportView 
             report={report} 
             onBack={() => {

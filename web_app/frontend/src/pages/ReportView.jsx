@@ -28,7 +28,7 @@ function calculateLabelFrequencies(timeline) {
   })).sort((a, b) => b.count - a.count);
 }
 
-export default function ReportView({ report, onBack }) {
+export default function ReportView({ report, onBack, backLabel = 'Back to Home' }) {
   const [expandedStudent, setExpandedStudent] = useState(null);
   const [isExporting, setIsExporting] = useState(false);
 
@@ -105,21 +105,20 @@ export default function ReportView({ report, onBack }) {
 
   return (
     <div className="report-panel panel animate-in">
-      <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+      <header className="report-header">
         <div>
           <h1>Class Report: {report.room_name}</h1>
           <p className="muted">Generated at {new Date(report.generated_at).toLocaleString()}</p>
         </div>
-        <div style={{ display: 'flex', gap: '1rem' }}>
+        <div className="header-actions">
           <button 
             onClick={handleExport} 
             disabled={isExporting}
-            className="secondary-button" 
-            style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', background: 'rgba(255,255,255,0.1)' }}
+            className="secondary-button"
           >
             <Download size={18} /> {isExporting ? 'Generating...' : 'Export PDF'}
           </button>
-          <button onClick={onBack}>Back to Home</button>
+          <button onClick={onBack}>{backLabel}</button>
         </div>
       </header>
 
@@ -159,11 +158,11 @@ export default function ReportView({ report, onBack }) {
           <h3 className="text-sm muted" style={{ marginBottom: '1rem', textTransform: 'uppercase' }}>FOCUS SCORE OVER TIME</h3>
           <ResponsiveContainer width="100%" height="90%">
             <LineChart data={timelineData}>
-              <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.1)" />
+              <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
               <XAxis dataKey="time" stroke="var(--muted)" fontSize={12} />
               <YAxis domain={[0, 100]} stroke="var(--muted)" fontSize={12} />
               <Tooltip 
-                contentStyle={{ background: 'var(--card)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '8px' }}
+                contentStyle={{ background: 'white', border: '1px solid var(--border)', borderRadius: '8px', color: 'var(--text)' }}
                 itemStyle={{ color: 'var(--text)' }}
               />
               <Line type="monotone" dataKey="avgScore" stroke="var(--primary)" strokeWidth={3} dot={false} name="Avg Focus %" />
@@ -174,11 +173,11 @@ export default function ReportView({ report, onBack }) {
           <h3 className="text-sm muted" style={{ marginBottom: '1rem', textTransform: 'uppercase' }}>ATTENDANCE & CAMERA TRENDS</h3>
           <ResponsiveContainer width="100%" height="90%">
             <AreaChart data={timelineData}>
-              <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.1)" />
+              <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
               <XAxis dataKey="time" stroke="var(--muted)" fontSize={12} />
               <YAxis stroke="var(--muted)" fontSize={12} />
               <Tooltip 
-                contentStyle={{ background: 'var(--card)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '8px' }}
+                contentStyle={{ background: 'white', border: '1px solid var(--border)', borderRadius: '8px', color: 'var(--text)' }}
               />
               <Legend verticalAlign="top" height={36}/>
               <Area type="monotone" dataKey="totalStudents" stackId="1" stroke="#8884d8" fill="#8884d8" name="Total Present" />
