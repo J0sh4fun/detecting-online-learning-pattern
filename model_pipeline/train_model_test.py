@@ -18,8 +18,8 @@ from train_model import (
 )
 
 ROOT_DIR = Path(__file__).resolve().parent
-DEFAULT_TRAIN_PATH = ROOT_DIR / "data" / "posture_dataset.csv"
-DEFAULT_TEST_PATH = ROOT_DIR / "data" / "test.csv"
+DEFAULT_TRAIN_PATH = ROOT_DIR / "data" / "posture_dataset_train.csv"
+DEFAULT_TEST_PATH = ROOT_DIR / "data" / "posture_dataset_test.csv"
 
 
 def load_named_dataset(name: str, path: Path) -> pd.DataFrame:
