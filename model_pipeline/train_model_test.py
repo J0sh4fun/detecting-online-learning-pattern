@@ -6,7 +6,7 @@ from pathlib import Path
 import joblib
 import numpy as np
 import pandas as pd
-from sklearn.metrics import accuracy_score, balanced_accuracy_score, classification_report, confusion_matrix, f1_score
+from sklearn.metrics import accuracy_score, balanced_accuracy_score, classification_report, confusion_matrix, f1_score, r2_score
 from sklearn.model_selection import cross_validate
 
 from train_model import (
@@ -89,6 +89,14 @@ def choose_model_with_cv(X_train: pd.DataFrame, y_train: pd.Series, train_groups
     return best_name, models[best_name]
 
 
+def calculate_label_encoded_r2(y_true: pd.Series, y_pred: np.ndarray) -> tuple[float, dict[str, int]]:
+    labels = sorted(set(y_true.astype(str)) | set(str(label) for label in y_pred))
+    label_to_id = {label: index for index, label in enumerate(labels)}
+    y_true_encoded = np.array([label_to_id[str(label)] for label in y_true])
+    y_pred_encoded = np.array([label_to_id[str(label)] for label in y_pred])
+    return float(r2_score(y_true_encoded, y_pred_encoded)), label_to_id
+
+
 def evaluate_external_test(best_name: str, pipeline, X_train, y_train, X_test, y_test) -> None:
     print(f"\nSelected model by training CV: {best_name}")
     pipeline.fit(X_train, y_train)
@@ -100,12 +108,14 @@ def evaluate_external_test(best_name: str, pipeline, X_train, y_train, X_test, y
     test_acc = accuracy_score(y_test, y_test_pred)
     test_f1 = f1_score(y_test, y_test_pred, average="macro", zero_division=0)
     test_bal_acc = balanced_accuracy_score(y_test, y_test_pred)
+    test_r2, r2_label_mapping = calculate_label_encoded_r2(y_test, y_test_pred)
 
     print("\n=== External-person test evaluation ===")
     print(f"train_f1_macro:    {train_f1:.4f}")
     print(f"accuracy:          {test_acc:.4f}")
     print(f"f1_macro:          {test_f1:.4f}")
     print(f"balanced_accuracy: {test_bal_acc:.4f}")
+    print(f"label_encoded_r2:  {test_r2:.4f}")
     print(f"train/test f1 gap: {train_f1 - test_f1:.4f}")
     print("\nClassification report:")
     print(classification_report(y_test, y_test_pred, digits=4, zero_division=0))
