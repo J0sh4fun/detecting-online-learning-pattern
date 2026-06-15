@@ -26,7 +26,7 @@ class Settings:
     livekit_api_key: str = os.getenv("LIVEKIT_API_KEY", "devkey")
     livekit_api_secret: str = os.getenv("LIVEKIT_API_SECRET", "9f1c4d8a6b2e7f0c3a5d1e9b4c8f2a7d")
     max_students_per_room: int = int(os.getenv("MAX_STUDENTS_PER_ROOM", "20"))
-    min_ingest_interval_sec: float = float(os.getenv("MIN_INGEST_INTERVAL_SEC", "0.75"))
+    min_ingest_interval_sec: float = float(os.getenv("MIN_INGEST_INTERVAL_SEC", "0.5"))
     score_low_threshold: float = float(os.getenv("SCORE_LOW_THRESHOLD", "55"))
     verify_discrepancy_threshold: float = float(os.getenv("VERIFY_DISCREPANCY_THRESHOLD", "25"))
     database_url: str = os.getenv("DATABASE_URL", "mysql+aiomysql://root:focusdev@localhost:3306/focus_classroom")

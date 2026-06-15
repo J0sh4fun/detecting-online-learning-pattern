@@ -134,7 +134,7 @@ function TeacherStatusTable({ students }) {
   const [now, setNow] = useState(() => Date.now());
 
   useEffect(() => {
-    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    const timer = window.setInterval(() => setNow(Date.now()), 500);
     return () => window.clearInterval(timer);
   }, []);
 
@@ -213,7 +213,7 @@ function TeacherVideoGrid({ snapshots, sidebarOpen }) {
       const group = groups.get(studentId);
       if (item.publication.source === Track.Source.Camera) group.cameraTrack = item;
       if (item.publication.source === Track.Source.ScreenShare) group.screenTrack = item;
-      
+
       try {
         const metadata = JSON.parse(item.participant.metadata || '{}');
         group.handRaised = metadata.hand_raised === true;
@@ -229,7 +229,7 @@ function TeacherVideoGrid({ snapshots, sidebarOpen }) {
     }
 
     const array = Array.from(groups.values());
-    
+
     return array.map(g => {
       const studentId = g.studentId;
       const score = snapshots[studentId];
@@ -306,7 +306,7 @@ function TeacherVideoGrid({ snapshots, sidebarOpen }) {
         ) : (
           students.map((student) => {
             const displayTrack = student.screenTrack || student.cameraTrack;
-            
+
             return (
               <article
                 key={student.studentId}
@@ -420,14 +420,14 @@ export default function TeacherDashboard() {
       >
         <div className="teacher-workspace">
           <TeacherVideoGrid snapshots={scores} sidebarOpen={sidebarOpen} />
-          
+
           <aside className={`teacher-sidebar ${sidebarOpen ? 'open' : ''}`}>
             <TeacherStatusTable students={Object.values(scores).map(score => ({
-               studentId: score.student_id,
-               status: score.status,
-               score: score.score,
-               camera: score.camera_on ? 'On' : 'Off',
-               lastUpdate: score.last_update
+              studentId: score.student_id,
+              status: score.status,
+              score: score.score,
+              camera: score.camera_on ? 'On' : 'Off',
+              lastUpdate: score.last_update
             }))} />
           </aside>
         </div>
@@ -435,8 +435,8 @@ export default function TeacherDashboard() {
         <div className="room-controls">
           <ControlBar variation="minimal" controls={{ microphone: true, camera: true, screenShare: true, chat: false }} />
           <div className="divider" />
-          <button 
-            className={`lk-button toggle-sidebar-btn ${sidebarOpen ? 'active' : ''}`} 
+          <button
+            className={`lk-button toggle-sidebar-btn ${sidebarOpen ? 'active' : ''}`}
             onClick={() => setSidebarOpen(!sidebarOpen)}
             title="Toggle Status Sidebar"
           >
@@ -448,12 +448,12 @@ export default function TeacherDashboard() {
 
       {report && (
         <div className="report-overlay">
-          <ReportView 
-            report={report} 
+          <ReportView
+            report={report}
             onBack={() => {
               setReport(null);
               navigate('/');
-            }} 
+            }}
           />
         </div>
       )}

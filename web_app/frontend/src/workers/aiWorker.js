@@ -73,7 +73,7 @@ let frameHeight = 480;
 let latestLandmarks = null;
 let latestFaceLandmarks = null;
 
-let flushIntervalMs = 2000;
+let flushIntervalMs = 500;
 let sampledFps = 5;
 let maxHistory = 6;
 let yoloCheckInterval = 2;
@@ -121,7 +121,7 @@ async function initWorker(config) {
   const {
     modelUrl,
     yoloUrl = '/models/yolo26s.onnx',
-    flushIntervalMs: interval = 2000,
+    flushIntervalMs: interval = 500,
     sampledFps: fps = 5,
     maxHistory: historyWindow = 6,
     yoloCheckInterval: phoneEveryN = 2,
