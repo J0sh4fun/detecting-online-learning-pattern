@@ -1,6 +1,7 @@
 from __future__ import annotations
 from contextlib import asynccontextmanager
 
+import asyncio
 import base64
 from datetime import datetime, timezone
 
@@ -240,6 +241,8 @@ async def student_scores_socket(
             user = res.scalar_one_or_none()
             if not user:
                 raise ValueError("User not found")
+            
+            user_id = user.id
 
             await store.update_student_score(
                 db,
@@ -264,7 +267,9 @@ async def student_scores_socket(
                     average_score=100.0, status="Camera Off", camera_on=False, client_sent_at=datetime.now(timezone.utc).timestamp()
                 )
         await socket_manager.broadcast_snapshot(room_code)
-    except Exception:
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
         socket_manager.disconnect_student(room_code, student_id)
         await websocket.close(code=4400, reason="Malformed payload")
 
@@ -284,7 +289,9 @@ async def verify_frame(payload: VerifyFrameRequest, db: AsyncSession = Depends(g
         raise HTTPException(status_code=400, detail="Invalid frame payload") from exc
 
     try:
-        server = get_verification_scorer().score_frame(frame)
+        # Đẩy hàm chạy AI nặng về CPU sang một Thread riêng biệt để không block Event Loop
+        scorer = get_verification_scorer()
+        server = await asyncio.to_thread(scorer.score_frame, frame)
     except Exception as exc:
         raise HTTPException(status_code=503, detail=f"Scoring model unavailable: {exc}") from exc
     discrepancy = abs(server.score - payload.client_score)
