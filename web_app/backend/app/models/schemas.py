@@ -67,7 +67,7 @@ class StudentScoreIngest(BaseModel):
     average_score: float = Field(ge=0, le=100)
     status: str = Field(min_length=2, max_length=80)
     camera_on: bool
-    sampled_fps: float = Field(ge=0.1, le=60)
+    sampled_fps: float = Field(ge=0.0, le=60)
     sample_count: int = Field(ge=1, le=50)
     client_sent_at: float
 
