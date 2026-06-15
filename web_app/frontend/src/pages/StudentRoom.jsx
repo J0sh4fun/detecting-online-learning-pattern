@@ -229,16 +229,34 @@ function StudentAiPipeline({ session, roomId, studentId, setError, setRoomClosed
     };
   }, [roomId, sendScoreUpdate, session.session_token, studentId, setError, setRoomClosedData]);
 
+  const mediaStreamTrack = cameraTrack?.track?.mediaStreamTrack;
+
   useEffect(() => {
-    const mediaStreamTrack = cameraTrack?.track?.mediaStreamTrack;
     if (hiddenVideoRef.current && mediaStreamTrack) {
       const stream = new MediaStream([mediaStreamTrack]);
       hiddenVideoRef.current.srcObject = stream;
+      // Chạy video tĩnh tiếng
       hiddenVideoRef.current.play().catch(() => undefined);
+    } else if (hiddenVideoRef.current) {
+      // Clear video khi tắt cam
+      hiddenVideoRef.current.srcObject = null;
     }
-  }, [cameraTrack]);
+  }, [mediaStreamTrack]);
 
-  return <video ref={hiddenVideoRef} muted playsInline style={{ display: 'none' }} />;
+  return (
+    <video 
+      ref={hiddenVideoRef} 
+      muted 
+      playsInline 
+      style={{ 
+        position: 'absolute', 
+        width: '1px', 
+        height: '1px', 
+        opacity: 0, 
+        pointerEvents: 'none' 
+      }} 
+    />
+  );
 }
 
 function RaiseHandButton() {

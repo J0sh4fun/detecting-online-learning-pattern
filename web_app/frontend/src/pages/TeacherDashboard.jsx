@@ -7,6 +7,7 @@ import '@livekit/components-styles';
 import { endRoom } from '../lib/api';
 import { getSession } from '../lib/sessionStore';
 import ReportView from './ReportView';
+import { VideoTrack } from '@livekit/components-react';
 
 function formatUpdateAge(value, now) {
   if (!value) return 'No update';
@@ -304,7 +305,7 @@ function TeacherVideoGrid({ snapshots, sidebarOpen }) {
           </div>
         ) : (
           students.map((student) => {
-            const displayTrack = student.screenTrack || (student.camera === 'Off' ? null : student.cameraTrack);
+            const displayTrack = student.screenTrack || student.cameraTrack;
             
             return (
               <article
@@ -313,7 +314,7 @@ function TeacherVideoGrid({ snapshots, sidebarOpen }) {
                 onClick={() => { setFocusedStudentId(student.studentId); setSwapPip(false); }}
               >
                 {displayTrack ? (
-                  <AttachedVideo track={displayTrack.track} />
+                  <VideoTrack trackRef={{ participant: student.participant, publication: displayTrack.publication, source: displayTrack.publication.source }} />
                 ) : student.camera === 'Off' ? (
                   <CameraOffTile />
                 ) : (

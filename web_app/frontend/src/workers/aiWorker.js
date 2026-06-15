@@ -5,12 +5,55 @@ ort.env.wasm.wasmPaths = 'https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/';
 const PHONE_CLASS_ID = 67;
 
 const FEATURE_MEAN = [
-  0.5381992334717343, 0.692648546790163, 0.07948696901948259, 0.031646758224209516,
-  648.3677659214309, -35.40995455126158, 28.769947780261898, 0.2797828169913766,
+  0.5912850397877984,
+  0.6386924137931034,
+  0.13853071618037135,
+  0.08592355437665783,
+  2.9888225994694957,
+  -33.39181946949602,
+  0.24842403183023978,
+  0.3819628647214854,
+  0.4033495490716181,
+  -0.04561442970822282,
+  -0.571819151193634,
+  -0.07412790450928383,
+  -0.4676516710875332,
+  33.39181946949602,
+  119.03989936339522,
+  0.7119363395225464,
+  0.9743484350132626,
+  0.9830701326259946,
+  0.9778890716180372,
+  0.294037400530504,
+  0.22856976127320958,
+  0.7740053050397878,
+  0.49124668435013263,
 ];
+
 const FEATURE_SCALE = [
-  0.15490431488635853, 0.2297531086955083, 0.066732169187364, 0.037331699259384024,
-  476.44254697205355, 19.722409382463397, 96.85572689994291, 0.4488924061595902,
+  1.6221677061560418,
+  0.3845630444715387,
+  0.19982810638548598,
+  0.3261975880635139,
+  2.1237192721460363,
+  23.82927372115119,
+  141.6092543769391,
+  0.4858675073466445,
+  0.17622064008087374,
+  0.8358520209822504,
+  1.629131340162789,
+  1.1544485076305526,
+  1.5008452511670842,
+  23.82927372115119,
+  76.69905474805392,
+  0.45286089253741474,
+  0.09118692367480632,
+  0.03396455640848045,
+  0.075234210764983,
+  0.3249106583369266,
+  0.2696136536936384,
+  0.8604872655590918,
+  0.4999233735935277,
 ];
 
 const SCORE_BY_LABEL = {
@@ -155,7 +198,7 @@ function pushLabel(label) {
 async function predictPosture() {
   const features = extractFeatures();
   const scaled = features.map((value, idx) => (value - FEATURE_MEAN[idx]) / FEATURE_SCALE[idx]);
-  const tensor = new ort.Tensor('float32', Float32Array.from(scaled), [1, 8]);
+  const tensor = new ort.Tensor('float32', Float32Array.from(scaled), [1, 23]);
   const output = await postureSession.run({ [postureSession.inputNames[0]]: tensor });
 
   const labelOutput = output.output_label
@@ -213,32 +256,62 @@ function extractFeatures() {
   const h = frameHeight;
   const toPx = (lm) => ({ x: (1 - lm.x) * w, y: lm.y * h, z: lm.z * w });
   const dist = (p1, p2) => Math.hypot(p2.x - p1.x, p2.y - p1.y);
+  const midpoint = (p1, p2) => ({ x: (p1.x + p2.x) / 2, y: (p1.y + p2.y) / 2 });
 
-  const nose = toPx(latestLandmarks[0]);
-  const leftShoulder = toPx(latestLandmarks[11]);
-  const rightShoulder = toPx(latestLandmarks[12]);
-  const leftEar = toPx(latestLandmarks[7]);
-  const rightEar = toPx(latestLandmarks[8]);
-  const leftWrist = toPx(latestLandmarks[15]);
-  const rightWrist = toPx(latestLandmarks[16]);
+  const noseLm = latestLandmarks[0];
+  const lShoulderLm = latestLandmarks[11];
+  const rShoulderLm = latestLandmarks[12];
+  const lEarLm = latestLandmarks[7];
+  const rEarLm = latestLandmarks[8];
+  const lWristLm = latestLandmarks[15];
+  const rWristLm = latestLandmarks[16];
 
-  const midShoulder = { x: (leftShoulder.x + rightShoulder.x) / 2, y: (leftShoulder.y + rightShoulder.y) / 2 };
-  const midEar = { x: (leftEar.x + rightEar.x) / 2, y: (leftEar.y + rightEar.y) / 2 };
-  const shoulderWidth = dist(leftShoulder, rightShoulder) || 1;
+  const nose = toPx(noseLm);
+  const lShoulder = toPx(lShoulderLm);
+  const rShoulder = toPx(rShoulderLm);
+  const lEar = toPx(lEarLm);
+  const rEar = toPx(rEarLm);
+  const lWrist = toPx(lWristLm);
+  const rWrist = toPx(rWristLm);
+
+  const shoulderWidth = dist(lShoulder, rShoulder) || 1.0;
+  const midShoulder = midpoint(lShoulder, rShoulder);
+  const midEar = midpoint(lEar, rEar);
+  const midShoulderZ = (lShoulderLm.z * w + rShoulderLm.z * w) / 2.0;
 
   const neckRatio = Math.abs(midShoulder.y - midEar.y) / shoulderWidth;
-  const forwardLeanZ = ((latestLandmarks[11].z + latestLandmarks[12].z) / 2) - latestLandmarks[0].z;
-  const shoulderTiltRatio = Math.abs(leftShoulder.y - rightShoulder.y) / shoulderWidth;
-  const headTiltRatio = Math.abs(leftEar.y - rightEar.y) / shoulderWidth;
+  const forwardLeanZ = midShoulderZ - nose.z;
+  const shoulderTiltRatio = Math.abs(lShoulder.y - rShoulder.y) / shoulderWidth;
+  const headTiltRatio = Math.abs(lEar.y - rEar.y) / shoulderWidth;
 
-  let minHandToFace = 999;
-  for (const wrist of [leftWrist, rightWrist]) {
-    minHandToFace = Math.min(minHandToFace, Math.min(dist(wrist, leftEar), dist(wrist, nose)) / shoulderWidth);
+  const chestLevel = midShoulder.y + (shoulderWidth * 0.5);
+
+  let minHandToFace = 999.0;
+  let wristElevated = false;
+  let visibleWristCount = 0;
+
+  const wrists = [
+    { lm: lWristLm, px: lWrist },
+    { lm: rWristLm, px: rWrist }
+  ];
+
+  for (const wrist of wrists) {
+    if (wrist.lm.visibility > 0.2) {
+      visibleWristCount += 1;
+      const distFace = Math.min(dist(wrist.px, lEar), dist(wrist.px, nose));
+      minHandToFace = Math.min(minHandToFace, distFace / shoulderWidth);
+      if (wrist.px.y < chestLevel) {
+        wristElevated = true;
+      }
+    }
   }
 
   let poseX = 0;
   let poseY = 0;
-  if (latestFaceLandmarks) {
+  let faceDetected = 0;
+
+  if (latestFaceLandmarks && latestFaceLandmarks.length > 0) {
+    faceDetected = 1;
     const faceNose = latestFaceLandmarks[1];
     const faceLeftEye = latestFaceLandmarks[33];
     const faceRightEye = latestFaceLandmarks[263];
@@ -253,8 +326,26 @@ function extractFeatures() {
     poseX = (Math.atan2(dz, dy) * 180) / Math.PI;
   }
 
-  const wristElevated = (leftWrist.y < midShoulder.y + shoulderWidth * 0.5 || rightWrist.y < midShoulder.y + shoulderWidth * 0.5) ? 1 : 0;
-  return [neckRatio, forwardLeanZ, shoulderTiltRatio, headTiltRatio, minHandToFace, poseX, poseY, wristElevated];
+  const headOffsetXRatio = (midEar.x - midShoulder.x) / shoulderWidth;
+  const headOffsetYRatio = (midEar.y - midShoulder.y) / shoulderWidth;
+  const noseShoulderXRatio = (nose.x - midShoulder.x) / shoulderWidth;
+  const noseShoulderYRatio = (nose.y - midShoulder.y) / shoulderWidth;
+
+  // Trả về chính xác 23 đặc trưng (Features)
+  return [
+    neckRatio, forwardLeanZ, shoulderTiltRatio, headTiltRatio, minHandToFace, poseX, poseY, wristElevated ? 1.0 : 0.0,
+    shoulderWidth / Math.max(w, 1.0),
+    headOffsetXRatio, headOffsetYRatio,
+    noseShoulderXRatio, noseShoulderYRatio,
+    Math.abs(poseX), Math.abs(poseY),
+    faceDetected,
+    noseLm.visibility,
+    Math.min(lShoulderLm.visibility, rShoulderLm.visibility),
+    Math.min(lEarLm.visibility, rEarLm.visibility),
+    lWristLm.visibility, rWristLm.visibility,
+    visibleWristCount,
+    visibleWristCount > 0 ? 1.0 : 0.0
+  ];
 }
 
 function mapLabel(raw) {
