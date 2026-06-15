@@ -12,6 +12,7 @@ def build_livekit_token(*, room_code: str, participant_id: str, is_teacher: bool
         can_publish=True,
         can_subscribe=True,
         can_publish_data=True,
+        can_update_own_metadata=True,
     )
     if is_teacher:
         grants.room_admin = True

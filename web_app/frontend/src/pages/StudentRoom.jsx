@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
-import { LiveKitRoom, useLocalParticipant, useRoomContext } from '@livekit/components-react';
+import { LiveKitRoom, useLocalParticipant, useRoomContext, ControlBar } from '@livekit/components-react';
 import { RoomEvent, Track } from 'livekit-client';
+import { Hand } from 'lucide-react';
 import '@livekit/components-styles';
 import { getSession } from '../lib/sessionStore';
 
@@ -13,9 +14,9 @@ function getCameraTrackItems(room, { includeLocal = true, participantFilter = ()
 
   return participants.flatMap((participant) => (
     Array.from(participant.trackPublications.values())
-      .filter((publication) => publication.source === Track.Source.Camera && publication.track && participantFilter(participant))
+      .filter((publication) => (publication.source === Track.Source.Camera || publication.source === Track.Source.ScreenShare) && publication.track && participantFilter(participant))
       .map((publication) => ({
-        id: publication.trackSid || publication.sid || `${participant.identity}-${publication.trackName || 'camera'}`,
+        id: publication.trackSid || publication.sid || `${participant.identity}-${publication.trackName || publication.source}`,
         participant,
         publication,
         track: publication.track,
@@ -31,7 +32,7 @@ function useCameraTrackItems(options) {
     const refresh = () => {
       for (const participant of room.remoteParticipants.values()) {
         for (const publication of participant.trackPublications.values()) {
-          if (publication.source === Track.Source.Camera && !publication.track && typeof publication.setSubscribed === 'function') {
+          if ((publication.source === Track.Source.Camera || publication.source === Track.Source.ScreenShare) && !publication.track && typeof publication.setSubscribed === 'function') {
             publication.setSubscribed(true);
           }
         }
@@ -87,12 +88,32 @@ function AttachedVideo({ track }) {
 }
 
 function StudentAiPipeline({ session, roomId, studentId, setError, setRoomClosedData }) {
-  const { cameraTrack } = useLocalParticipant();
+  const { cameraTrack, isCameraEnabled } = useLocalParticipant();
   const workerRef = useRef(null);
   const wsRef = useRef(null);
   const hiddenVideoRef = useRef(null);
   const captureTimerRef = useRef(null);
   const lastScoreRef = useRef(100);
+  const lastStatusRef = useRef('Focused');
+  const cameraEnabledRef = useRef(isCameraEnabled);
+
+  const sendScoreUpdate = useCallback((cameraOn = cameraEnabledRef.current) => {
+    if (wsRef.current?.readyState !== WebSocket.OPEN) return;
+    wsRef.current.send(JSON.stringify({
+      token: session.session_token,
+      average_score: cameraOn ? lastScoreRef.current : 0,
+      status: cameraOn ? lastStatusRef.current : 'Camera Off',
+      camera_on: cameraOn,
+      sampled_fps: cameraOn ? 5.0 : 0.0,
+      sample_count: 1,
+      client_sent_at: Date.now() / 1000,
+    }));
+  }, [session.session_token]);
+
+  useEffect(() => {
+    cameraEnabledRef.current = isCameraEnabled;
+    sendScoreUpdate(isCameraEnabled);
+  }, [isCameraEnabled, sendScoreUpdate]);
 
   useEffect(() => {
     let disposed = false;
@@ -161,12 +182,14 @@ function StudentAiPipeline({ session, roomId, studentId, setError, setRoomClosed
       const payload = event.data;
       if (payload.type === 'score_update' && wsRef.current?.readyState === WebSocket.OPEN) {
         lastScoreRef.current = payload.averageScore;
+        lastStatusRef.current = payload.status;
+        const cameraOn = cameraEnabledRef.current && (payload.cameraOn ?? true);
         wsRef.current.send(JSON.stringify({
           token: session.session_token,
-          average_score: payload.averageScore,
-          status: payload.status,
-          camera_on: payload.cameraOn ?? true,
-          sampled_fps: payload.sampledFps ?? 5.0,
+          average_score: cameraOn ? payload.averageScore : 0,
+          status: cameraOn ? payload.status : 'Camera Off',
+          camera_on: cameraOn,
+          sampled_fps: cameraOn ? (payload.sampledFps ?? 5.0) : 0.0,
           sample_count: payload.sampleCount ?? 1,
           client_sent_at: Date.now() / 1000,
         }));
@@ -180,6 +203,7 @@ function StudentAiPipeline({ session, roomId, studentId, setError, setRoomClosed
     const wsBase = (import.meta.env.VITE_API_WS_BASE || 'ws://localhost:8000').replace(/\/$/, '');
     const ws = new WebSocket(`${wsBase}/ws/student/${roomId}/${encodeURIComponent(studentId)}`);
     wsRef.current = ws;
+    ws.onopen = () => sendScoreUpdate(cameraEnabledRef.current);
     ws.onerror = () => setError(`Score WebSocket failed (${wsBase})`);
     ws.onmessage = (event) => {
       try {
@@ -187,7 +211,7 @@ function StudentAiPipeline({ session, roomId, studentId, setError, setRoomClosed
         if (data.type === 'room_closed') {
           setRoomClosedData({ teacherName: data.teacher_id || 'The teacher' });
         }
-      } catch (err) {
+      } catch {
         // Ignore parse errors for now
       }
     };
@@ -203,7 +227,7 @@ function StudentAiPipeline({ session, roomId, studentId, setError, setRoomClosed
       pose.close();
       faceMesh.close();
     };
-  }, [roomId, session.session_token, studentId, setError]);
+  }, [roomId, sendScoreUpdate, session.session_token, studentId, setError, setRoomClosedData]);
 
   useEffect(() => {
     const mediaStreamTrack = cameraTrack?.track?.mediaStreamTrack;
@@ -217,19 +241,67 @@ function StudentAiPipeline({ session, roomId, studentId, setError, setRoomClosed
   return <video ref={hiddenVideoRef} muted playsInline style={{ display: 'none' }} />;
 }
 
-function StudentVideoGrid() {
-  const tracks = useCameraTrackItems(useMemo(() => ({ includeLocal: true }), []));
+function RaiseHandButton() {
+  const { localParticipant } = useLocalParticipant();
+  let metadata = {};
+  if (localParticipant?.metadata) {
+    try {
+      metadata = JSON.parse(localParticipant.metadata);
+    } catch {
+      metadata = {};
+    }
+  }
+
+  const isRaised = metadata.hand_raised === true;
+
+  const toggleHand = () => {
+    if (!localParticipant) return;
+    const newMetadata = JSON.stringify({ ...metadata, hand_raised: !isRaised });
+    localParticipant.setMetadata(newMetadata);
+  };
+
   return (
-    <section className="student-grid">
-      {tracks.length === 0 ? (
-        <p className="muted">Waiting for camera stream...</p>
+    <button 
+      className={`lk-button raise-hand-btn ${isRaised ? 'active' : ''}`} 
+      onClick={toggleHand}
+      title={isRaised ? 'Lower Hand' : 'Raise Hand'}
+    >
+      <Hand size={18} />
+      <span>{isRaised ? 'Lower Hand' : 'Raise Hand'}</span>
+    </button>
+  );
+}
+
+function StudentFocusLayout() {
+  const tracks = useCameraTrackItems(useMemo(() => ({ includeLocal: true }), []));
+
+  const localTrack = tracks.find(t => t.participant.isLocal && t.publication.source === Track.Source.Camera);
+  
+  const teacherScreenshare = tracks.find(t => t.participant.identity.startsWith('teacher-') && t.publication.source === Track.Source.ScreenShare);
+  const studentScreenshare = tracks.find(t => !t.participant.identity.startsWith('teacher-') && t.publication.source === Track.Source.ScreenShare);
+  const teacherCamera = tracks.find(t => t.participant.identity.startsWith('teacher-') && t.publication.source === Track.Source.Camera);
+
+  const mainTrack = teacherScreenshare || studentScreenshare || teacherCamera;
+
+  return (
+    <section className="focus-layout">
+      {mainTrack ? (
+        <article key={mainTrack.id} className="main-view">
+          <AttachedVideo track={mainTrack.track} />
+          <div className="view-overlay">
+            <span>{mainTrack.participant.identity}{mainTrack.publication.source === Track.Source.ScreenShare ? "'s screen" : ""}</span>
+          </div>
+        </article>
       ) : (
-        tracks.map(({ id, participant, track }) => (
-          <article key={id} className="student-view">
-            <header>{participant.identity}</header>
-            <AttachedVideo track={track} />
-          </article>
-        ))
+        <div className="empty-main screen-center">
+          <p className="muted">Waiting for teacher or presentation...</p>
+        </div>
+      )}
+
+      {localTrack && (
+        <article key={localTrack.id} className="pip-view">
+          <AttachedVideo track={localTrack.track} />
+        </article>
       )}
     </section>
   );
@@ -253,23 +325,20 @@ export default function StudentRoom() {
   }
 
   return (
-    <main className="student-layout">
-      <header className="class-header panel">
-        <div>
-          <h1>Classroom {roomId}</h1>
-          <p className="muted">
-            Connected as <strong>{studentId}</strong>. AI processing runs in the background.
-          </p>
-        </div>
-        {error && <p className="error-text">{error}</p>}
-      </header>
+    <main className="student-room-fullscreen">
+      <div className="room-info-chip">
+        <span>Room <strong>{roomId}</strong></span>
+        <span className="muted">·</span>
+        <span className="muted">{studentId}</span>
+      </div>
+      {error && <p className="error-text floating-error">{error}</p>}
 
       <LiveKitRoom
         token={session.livekit_token}
         serverUrl={session.livekit_url}
         connect
         video
-        audio={false}
+        audio={true}
         onError={(err) => setError(`LiveKit connection failed: ${err?.message || 'Unknown error'}`)}
         onMediaDeviceFailure={(failure, kind) => {
           setError(`Cannot start ${kind || 'media device'}: ${failure || 'permission or device error'}`);
@@ -277,7 +346,11 @@ export default function StudentRoom() {
         className="room-shell"
       >
         <StudentAiPipeline session={session} roomId={roomId} studentId={studentId} setError={setError} setRoomClosedData={setRoomClosedData} />
-        <StudentVideoGrid />
+        <StudentFocusLayout />
+        <div className="room-controls">
+          <ControlBar variation="minimal" controls={{ microphone: true, camera: true, screenShare: true, chat: false }} />
+          <RaiseHandButton />
+        </div>
       </LiveKitRoom>
 
       {roomClosedData && (

@@ -138,6 +138,8 @@ video {
 .mt-4 { margin-top: 1rem; }
 .animate-in { animation: fadeIn 0.25s ease-out; }
 .success-text { color: var(--success); }
+.text-warning { color: var(--warning); }
+.ml-2 { margin-left: 0.5rem; }
 
 .screen-center {
   display: flex;
@@ -494,6 +496,32 @@ video {
   border-bottom: 1px solid var(--border);
 }
 
+.status-panel-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.95rem 1rem;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-soft);
+}
+
+.status-panel-heading h3 {
+  margin: 0;
+  font-size: 0.92rem;
+}
+
+.status-panel-heading span {
+  display: inline-grid;
+  min-width: 2rem;
+  height: 2rem;
+  place-items: center;
+  border-radius: 999px;
+  background: white;
+  color: var(--muted);
+  font-weight: 900;
+}
+
 .status-table {
   width: 100%;
   border-collapse: collapse;
@@ -565,6 +593,11 @@ video {
   gap: 0.85rem;
 }
 
+.table-score-container.compact {
+  gap: 0.55rem;
+  min-width: 0;
+}
+
 .table-score-bar,
 .mini-bar,
 .label-bar-container {
@@ -577,6 +610,10 @@ video {
 .table-score-bar {
   min-width: 130px;
   flex: 1;
+}
+
+.table-score-container.compact .table-score-bar {
+  min-width: 0;
 }
 
 .mini-bar {
@@ -835,6 +872,743 @@ video {
 @keyframes fadeIn {
   from { opacity: 0; transform: translateY(8px); }
   to { opacity: 1; transform: translateY(0); }
+}
+
+.room-controls {
+  position: fixed;
+  bottom: 2rem;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  background: rgba(255, 255, 255, 0.95);
+  padding: 0.75rem 1.5rem;
+  border-radius: 999px;
+  box-shadow: 0 12px 36px rgba(11, 31, 58, 0.15);
+  z-index: 100;
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(217, 226, 242, 0.85);
+}
+
+.lk-device-menu {
+  min-width: min(320px, calc(100vw - 2rem));
+  border: 1px solid var(--border) !important;
+  border-radius: 12px !important;
+  background: white !important;
+  color: var(--text) !important;
+  padding: 0.55rem !important;
+  box-shadow: 0 16px 40px rgba(11, 31, 58, 0.2) !important;
+  z-index: 300 !important;
+}
+
+.lk-device-menu,
+.lk-device-menu * {
+  color: var(--text) !important;
+}
+
+.lk-device-menu .lk-device-menu-heading {
+  padding: 0.45rem 0.55rem 0.35rem;
+  color: var(--muted) !important;
+  font-size: 0.72rem;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.lk-device-menu .lk-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.lk-device-menu .lk-button {
+  width: 100%;
+  min-height: 36px;
+  justify-content: flex-start;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: white;
+  color: var(--text);
+  padding: 0.5rem 0.6rem;
+  box-shadow: none;
+  text-align: left;
+  white-space: normal;
+}
+
+.lk-device-menu li[data-lk-active="true"] .lk-button,
+.lk-device-menu .lk-button:hover {
+  border-color: rgba(11, 92, 255, 0.2);
+  background: var(--primary-soft);
+  color: var(--primary-strong);
+  transform: none;
+}
+
+.raise-hand-btn {
+  background: var(--surface-soft);
+  color: var(--text);
+  border: 1px solid var(--border);
+  min-height: 40px;
+  padding: 0 1.2rem;
+  border-radius: 999px;
+  transition: all 0.2s ease;
+}
+
+.raise-hand-btn:hover {
+  background: var(--primary-soft);
+  border-color: var(--primary);
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(11, 92, 255, 0.1);
+}
+
+.raise-hand-btn.active {
+  background: #facc15;
+  color: #111827;
+  border-color: #facc15;
+  box-shadow: 0 6px 16px rgba(250, 204, 21, 0.32);
+}
+
+.flex-header {
+  display: flex;
+  align-items: center;
+}
+
+.hand-icon {
+  animation: pulse-hand 2s infinite cubic-bezier(0.4, 0, 0.6, 1);
+}
+
+@keyframes pulse-hand {
+  0%, 100% { transform: scale(1) rotate(0deg); opacity: 1; }
+  50% { transform: scale(1.15) rotate(-10deg); opacity: 0.8; }
+}
+
+/* New Layout Styles */
+
+.student-room-fullscreen {
+  position: relative;
+  width: 100vw;
+  height: 100vh;
+  overflow: hidden;
+  background: #0b1020;
+}
+
+.room-info-chip {
+  position: fixed;
+  top: 1rem;
+  left: 1rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.45rem 0.85rem;
+  background: rgba(255, 255, 255, 0.12);
+  backdrop-filter: blur(12px);
+  border-radius: 999px;
+  color: white;
+  font-size: 0.82rem;
+  font-weight: 700;
+  z-index: 50;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.room-info-chip .muted {
+  color: rgba(255, 255, 255, 0.5);
+}
+
+.floating-error {
+  position: fixed;
+  top: 1rem;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 50;
+  max-width: 600px;
+}
+
+.empty-main {
+  width: 100%;
+  height: 100%;
+  background: radial-gradient(ellipse at center, rgba(11, 92, 255, 0.08), #0b1020);
+}
+
+.student-room-fullscreen .focus-layout {
+  height: 100vh;
+  border-radius: 0;
+}
+
+.student-room-fullscreen .room-controls {
+  bottom: 1.5rem;
+}
+
+.focus-layout {
+  position: relative;
+  width: 100%;
+  height: calc(100vh - 12rem);
+  background: #000;
+  border-radius: 16px;
+  overflow: hidden;
+  box-shadow: var(--shadow-soft);
+}
+
+.focus-layout .screen-center {
+  min-height: 100%;
+}
+
+.main-view {
+  width: 100%;
+  height: 100%;
+}
+
+.main-view video {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.pip-view {
+  position: absolute;
+  bottom: 1.5rem;
+  right: 1.5rem;
+  width: 240px;
+  aspect-ratio: 16/9;
+  border-radius: 12px;
+  overflow: hidden;
+  border: 2px solid rgba(255, 255, 255, 0.2);
+  box-shadow: 0 12px 36px rgba(0,0,0,0.4);
+  transition: transform 0.2s ease, border-color 0.2s ease;
+  z-index: 10;
+  background: #111;
+}
+
+.pip-left {
+  right: auto;
+  left: 1.5rem;
+  cursor: pointer;
+}
+
+.pip-left:hover {
+  border-color: var(--primary);
+  transform: scale(1.05);
+}
+
+.view-overlay {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  background: linear-gradient(to top, rgba(0,0,0,0.8), transparent);
+  color: white;
+  padding: 1rem;
+  font-weight: 700;
+  font-size: 1rem;
+}
+
+.pip-overlay {
+  padding: 0.5rem;
+  font-size: 0.85rem;
+}
+
+.hover-overlay {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  top: 0;
+  background: rgba(0,0,0,0.4);
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+
+.pip-left:hover .hover-overlay {
+  opacity: 1;
+}
+
+.teacher-workspace {
+  display: flex;
+  gap: 0;
+  align-items: stretch;
+  width: 100%;
+  min-height: 100vh;
+  position: relative;
+  overflow: hidden;
+}
+
+.grid-container, .focused-container {
+  flex: 1;
+  transition: padding-right 0.3s ease;
+  width: 100%;
+}
+
+.teacher-sidebar {
+  width: 400px;
+  flex-shrink: 0;
+  background: var(--surface);
+  border-left: 1px solid var(--border);
+  height: calc(100vh - 10rem);
+  position: absolute;
+  right: -420px;
+  top: 0;
+  transition: right 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: -8px 0 24px rgba(0,0,0,0.04);
+  z-index: 20;
+  overflow-y: auto;
+  border-radius: 16px 0 0 16px;
+}
+
+.teacher-sidebar.open {
+  right: 0;
+}
+
+.sidebar-open {
+  padding-right: 0;
+}
+
+.status-sidebar-panel {
+  height: 100%;
+  border: 0;
+  border-radius: 16px 0 0 16px;
+  box-shadow: none;
+}
+
+.status-sidebar-panel .empty-cell {
+  padding: 1.5rem 1rem;
+}
+
+.status-card-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+  padding: 0.75rem;
+}
+
+.status-student-card {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: white;
+  padding: 0.75rem;
+}
+
+.status-student-card header {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  min-width: 0;
+  margin-bottom: 0.65rem;
+}
+
+.status-student-card strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.status-detail-grid {
+  display: grid;
+  grid-template-columns: 4.4rem minmax(0, 1fr);
+  gap: 0.45rem 0.65rem;
+  align-items: center;
+}
+
+.status-detail-label {
+  color: var(--muted);
+  font-size: 0.7rem;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.status-detail-grid .status-badge,
+.status-detail-grid .camera-tag {
+  width: fit-content;
+  max-width: 100%;
+  white-space: normal;
+}
+
+.teacher-grid.zoom-grid {
+  min-height: 360px;
+  height: clamp(360px, calc(100vh - 17rem), 760px);
+  display: grid;
+  gap: 0.75rem;
+  align-content: center;
+  justify-content: center;
+}
+
+.teacher-grid.zoom-grid.one {
+  grid-template-columns: minmax(280px, min(100%, 1040px));
+  grid-template-rows: minmax(220px, min(100%, 585px));
+}
+
+.teacher-grid.zoom-grid.two {
+  grid-template-columns: repeat(2, minmax(260px, 1fr));
+  grid-template-rows: minmax(260px, 1fr);
+}
+
+.teacher-grid.zoom-grid.four {
+  grid-template-columns: repeat(2, minmax(260px, 1fr));
+  grid-template-rows: repeat(2, minmax(190px, 1fr));
+}
+
+.teacher-grid.zoom-grid.six {
+  grid-template-columns: repeat(3, minmax(220px, 1fr));
+  grid-template-rows: repeat(2, minmax(170px, 1fr));
+}
+
+.teacher-grid.zoom-grid.nine {
+  grid-template-columns: repeat(3, minmax(200px, 1fr));
+  grid-template-rows: repeat(3, minmax(140px, 1fr));
+}
+
+.teacher-grid.zoom-grid.many {
+  grid-template-columns: repeat(4, minmax(170px, 1fr));
+  grid-auto-rows: minmax(120px, 1fr);
+}
+
+.student-card.hover-reveal {
+  cursor: pointer;
+  position: relative;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.student-card.hover-reveal video {
+  height: 100%;
+  aspect-ratio: auto;
+}
+
+.student-card.hover-reveal:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 12px 28px rgba(11, 92, 255, 0.15);
+}
+
+.student-card.hover-reveal .overlay-header,
+.student-card.hover-reveal .overlay-footer {
+  position: absolute;
+  left: 0;
+  right: 0;
+  background: rgba(255, 255, 255, 0.95);
+  backdrop-filter: blur(8px);
+  z-index: 10;
+  opacity: 1;
+  transition: opacity 0.2s ease;
+}
+
+.student-card.hover-reveal .overlay-header {
+  top: 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.student-card.hover-reveal .overlay-footer {
+  bottom: 0;
+  border-top: 1px solid var(--border);
+}
+
+.student-card.hover-reveal .overlay-header strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.student-card.hover-reveal:hover .overlay-header,
+.student-card.hover-reveal:hover .overlay-footer {
+  background: rgba(255, 255, 255, 0.98);
+}
+
+.video-placeholder,
+.camera-off-tile {
+  width: 100%;
+  height: 100%;
+  min-height: 180px;
+  aspect-ratio: auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.video-placeholder {
+  background: var(--surface-soft);
+  color: var(--muted);
+  font-weight: 700;
+}
+
+.camera-off-tile {
+  flex-direction: column;
+  gap: 0.9rem;
+  background: #fff6f6;
+  color: var(--error);
+  font-weight: 900;
+}
+
+.camera-off-cross {
+  position: relative;
+  width: min(42%, 180px);
+  min-width: 96px;
+  aspect-ratio: 1;
+}
+
+.camera-off-cross::before,
+.camera-off-cross::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 18%;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--error);
+  transform-origin: center;
+  box-shadow: 0 8px 18px rgba(217, 48, 37, 0.18);
+}
+
+.camera-off-cross::before {
+  transform: translate(-50%, -50%) rotate(45deg);
+}
+
+.camera-off-cross::after {
+  transform: translate(-50%, -50%) rotate(-45deg);
+}
+
+.focus-layout > .camera-off-tile {
+  min-height: 100%;
+}
+
+.back-btn {
+  margin-bottom: 1rem;
+  background: var(--surface);
+  color: var(--text);
+  border-color: var(--border);
+}
+
+.back-btn:hover {
+  background: var(--surface-soft);
+  color: var(--primary);
+}
+
+.divider {
+  width: 1px;
+  height: 24px;
+  background: var(--border);
+  margin: 0 0.5rem;
+}
+
+.toggle-sidebar-btn {
+  background: transparent;
+  color: var(--text);
+}
+
+.toggle-sidebar-btn:hover {
+  background: var(--primary-soft);
+}
+
+.toggle-sidebar-btn.active {
+  background: var(--primary-soft);
+  color: var(--primary);
+  border-color: var(--primary);
+}
+
+.teacher-room-fullscreen {
+  position: relative;
+  width: 100vw;
+  height: 100vh;
+  overflow: hidden;
+  background: #05070c;
+}
+
+.teacher-room-fullscreen .room-shell {
+  height: 100vh;
+}
+
+.teacher-room-info {
+  max-width: min(720px, calc(100vw - 12rem));
+}
+
+.teacher-room-info code {
+  border-color: rgba(255, 255, 255, 0.16);
+  background: rgba(255, 255, 255, 0.12);
+  color: white;
+  font-size: 0.75rem;
+}
+
+.teacher-end-button {
+  position: fixed;
+  top: 1rem;
+  right: 1rem;
+  min-height: 38px;
+  background: rgba(217, 48, 37, 0.92);
+  color: white;
+  padding: 0.48rem 0.9rem;
+  z-index: 60;
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.22);
+}
+
+.teacher-end-button:hover {
+  background: #b42318;
+}
+
+.teacher-grid-container,
+.teacher-focused-container {
+  height: 100vh;
+  padding: 0;
+}
+
+.teacher-grid.meeting-grid {
+  display: grid;
+  width: 100%;
+  height: 100vh;
+  min-height: 100vh;
+  gap: 0;
+  background: #05070c;
+  align-content: stretch;
+  justify-content: stretch;
+}
+
+.teacher-grid.meeting-grid.one {
+  grid-template-columns: 1fr;
+  grid-template-rows: 1fr;
+}
+
+.teacher-grid.meeting-grid.two {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-rows: 1fr;
+}
+
+.teacher-grid.meeting-grid.four {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-rows: repeat(2, minmax(0, 1fr));
+}
+
+.teacher-grid.meeting-grid.six {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-rows: repeat(2, minmax(0, 1fr));
+}
+
+.teacher-grid.meeting-grid.nine {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-rows: repeat(3, minmax(0, 1fr));
+}
+
+.teacher-grid.meeting-grid.many {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-auto-rows: minmax(0, 1fr);
+}
+
+.meeting-tile {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  border: 0;
+  border-radius: 0;
+  background: #090d16;
+  box-shadow: none;
+  cursor: pointer;
+  outline: 1px solid rgba(255, 255, 255, 0.06);
+  outline-offset: -1px;
+}
+
+.meeting-tile video {
+  width: 100%;
+  height: 100%;
+  aspect-ratio: auto;
+  object-fit: cover;
+}
+
+.meeting-tile.hand-raised {
+  z-index: 2;
+  outline: 5px solid #facc15;
+  outline-offset: -5px;
+  box-shadow: inset 0 0 0 1px rgba(17, 24, 39, 0.35), 0 0 0 1px #facc15;
+}
+
+.tile-nameplate {
+  position: absolute;
+  left: 1rem;
+  bottom: 1rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  max-width: calc(100% - 2rem);
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.68);
+  color: white;
+  padding: 0.42rem 0.7rem;
+  font-size: 0.85rem;
+  font-weight: 900;
+  opacity: 0;
+  transform: translateY(6px);
+  transition: opacity 0.16s ease, transform 0.16s ease;
+  pointer-events: none;
+}
+
+.tile-nameplate span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.meeting-tile:hover .tile-nameplate,
+.meeting-tile:focus-within .tile-nameplate {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.teacher-focus-layout {
+  width: 100%;
+  height: 100vh;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.teacher-focus-layout .main-view video {
+  object-fit: contain;
+  background: #000;
+}
+
+.floating-back-btn {
+  position: fixed;
+  top: 1rem;
+  left: 1rem;
+  z-index: 80;
+  margin: 0;
+  background: rgba(255, 255, 255, 0.92);
+  color: var(--text);
+}
+
+.teacher-room-fullscreen .teacher-sidebar {
+  position: fixed;
+  top: 0;
+  right: -420px;
+  height: 100vh;
+  z-index: 70;
+  border-radius: 16px 0 0 16px;
+}
+
+.teacher-room-fullscreen .teacher-sidebar.open {
+  right: 0;
+}
+
+.room-controls .lk-button[data-lk-source="microphone"][data-lk-enabled="false"],
+.room-controls .lk-button[data-lk-source="camera"][data-lk-enabled="false"] {
+  background: var(--error);
+  color: white;
+  border-color: var(--error);
+}
+
+.room-controls .lk-button[data-lk-source="screen_share"][data-lk-enabled="true"] {
+  background: var(--success);
+  color: white;
+  border-color: var(--success);
+}
+
+.room-controls .lk-button[data-lk-source="microphone"][data-lk-enabled="false"]:hover,
+.room-controls .lk-button[data-lk-source="camera"][data-lk-enabled="false"]:hover {
+  background: #b42318;
+  border-color: #b42318;
+}
+
+.room-controls .lk-button[data-lk-source="screen_share"][data-lk-enabled="true"]:hover {
+  background: #15803d;
+  border-color: #15803d;
 }
 
 @media (max-width: 900px) {

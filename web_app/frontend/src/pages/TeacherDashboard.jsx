@@ -1,13 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
-import { LiveKitRoom, useRoomContext } from '@livekit/components-react';
+import { LiveKitRoom, useRoomContext, ControlBar } from '@livekit/components-react';
 import { RoomEvent, Track } from 'livekit-client';
+import { Hand, PanelRightClose, PanelRightOpen } from 'lucide-react';
 import '@livekit/components-styles';
 import { endRoom } from '../lib/api';
 import { getSession } from '../lib/sessionStore';
 import ReportView from './ReportView';
-
-const PAGE_SIZE = 16;
 
 function formatUpdateAge(value, now) {
   if (!value) return 'No update';
@@ -31,9 +30,9 @@ function getCameraTrackItems(room, { includeLocal = true, participantFilter = ()
 
   return participants.flatMap((participant) => (
     Array.from(participant.trackPublications.values())
-      .filter((publication) => publication.source === Track.Source.Camera && publication.track && participantFilter(participant))
+      .filter((publication) => (publication.source === Track.Source.Camera || publication.source === Track.Source.ScreenShare) && publication.track && participantFilter(participant))
       .map((publication) => ({
-        id: publication.trackSid || publication.sid || `${participant.identity}-${publication.trackName || 'camera'}`,
+        id: publication.trackSid || publication.sid || `${participant.identity}-${publication.trackName || publication.source}`,
         participant,
         publication,
         track: publication.track,
@@ -49,7 +48,7 @@ function useCameraTrackItems(options) {
     const refresh = () => {
       for (const participant of room.remoteParticipants.values()) {
         for (const publication of participant.trackPublications.values()) {
-          if (publication.source === Track.Source.Camera && !publication.track && typeof publication.setSubscribed === 'function') {
+          if ((publication.source === Track.Source.Camera || publication.source === Track.Source.ScreenShare) && !publication.track && typeof publication.setSubscribed === 'function') {
             publication.setSubscribed(true);
           }
         }
@@ -67,7 +66,8 @@ function useCameraTrackItems(options) {
       .on(RoomEvent.TrackUnsubscribed, refresh)
       .on(RoomEvent.LocalTrackPublished, refresh)
       .on(RoomEvent.LocalTrackUnpublished, refresh)
-      .on(RoomEvent.ConnectionStateChanged, refresh);
+      .on(RoomEvent.ConnectionStateChanged, refresh)
+      .on(RoomEvent.ParticipantMetadataChanged, refresh);
 
     return () => {
       room
@@ -79,7 +79,8 @@ function useCameraTrackItems(options) {
         .off(RoomEvent.TrackUnsubscribed, refresh)
         .off(RoomEvent.LocalTrackPublished, refresh)
         .off(RoomEvent.LocalTrackUnpublished, refresh)
-        .off(RoomEvent.ConnectionStateChanged, refresh);
+        .off(RoomEvent.ConnectionStateChanged, refresh)
+        .off(RoomEvent.ParticipantMetadataChanged, refresh);
     };
   }, [room, options]);
 
@@ -104,6 +105,30 @@ function AttachedVideo({ track }) {
   return <video ref={videoRef} muted playsInline />;
 }
 
+function getStatusClass(status) {
+  if (status === 'Focused') return 'success';
+  if (status === 'Absence' || status === 'Using Phone' || status === 'Camera Off') return 'error';
+  return 'warning';
+}
+
+function CameraOffTile({ label }) {
+  return (
+    <div className="camera-off-tile" aria-label={label || 'Camera Off'}>
+      <div className="camera-off-cross" aria-hidden="true" />
+      {label && <span>{label}</span>}
+    </div>
+  );
+}
+
+function getZoomGridClass(count) {
+  if (count <= 1) return 'one';
+  if (count === 2) return 'two';
+  if (count <= 4) return 'four';
+  if (count <= 6) return 'six';
+  if (count <= 9) return 'nine';
+  return 'many';
+}
+
 function TeacherStatusTable({ students }) {
   const [now, setNow] = useState(() => Date.now());
 
@@ -113,155 +138,197 @@ function TeacherStatusTable({ students }) {
   }, []);
 
   return (
-    <section className="status-panel">
-      <table className="status-table">
-        <thead>
-          <tr>
-            <th>Student</th>
-            <th>Status</th>
-            <th style={{ width: '30%' }}>Focus Level</th>
-            <th>Camera</th>
-            <th>Last Update</th>
-          </tr>
-        </thead>
-        <tbody>
-          {students.length === 0 ? (
-            <tr>
-              <td colSpan="5" className="empty-cell">Waiting for students to join...</td>
-            </tr>
-          ) : (
-            students.map((student) => {
-              const scoreNum = parseFloat(student.score) || 0;
-              const isCameraOff = student.camera === 'Off';
-              const statusClass = student.status === 'Focused' ? 'success' : student.status === 'Absence' || student.status === 'Using Phone' ? 'error' : 'warning';
+    <section className="status-panel status-sidebar-panel">
+      <div className="status-panel-heading">
+        <h3>Student Status</h3>
+        <span>{students.length}</span>
+      </div>
 
-              return (
-                <tr key={student.studentId}>
-                  <td className="bold">{student.studentId}</td>
-                  <td>
-                    <span className={`status-badge ${statusClass}`}>
-                      {student.status}
-                    </span>
-                  </td>
-                  <td>
-                    <div className="table-score-container">
-                      <div className="table-score-bar">
-                        <div 
-                          className="bar-fill" 
-                          style={{ 
-                            width: `${scoreNum}%`,
-                            backgroundColor: scoreNum > 70 ? 'var(--success)' : scoreNum > 40 ? 'var(--warning)' : 'var(--error)'
-                          }}
-                        ></div>
-                      </div>
-                      <span className="score-label">{Math.round(scoreNum)}%</span>
+      {students.length === 0 ? (
+        <p className="empty-cell">Waiting for students to join...</p>
+      ) : (
+        <div className="status-card-list">
+          {students.map((student) => {
+            const scoreNum = parseFloat(student.score) || 0;
+            const isCameraOff = student.camera === 'Off';
+            const statusClass = getStatusClass(student.status);
+
+            return (
+              <article className="status-student-card" key={student.studentId}>
+                <header>
+                  <strong>{student.studentId}</strong>
+                  {student.handRaised && <Hand size={14} className="text-warning ml-2" />}
+                </header>
+
+                <div className="status-detail-grid">
+                  <span className="status-detail-label">Status</span>
+                  <span className={`status-badge ${statusClass}`}>{student.status}</span>
+
+                  <span className="status-detail-label">Focus</span>
+                  <div className="table-score-container compact">
+                    <div className="table-score-bar">
+                      <div
+                        className="bar-fill"
+                        style={{
+                          width: `${scoreNum}%`,
+                          backgroundColor: scoreNum > 70 ? 'var(--success)' : scoreNum > 40 ? 'var(--warning)' : 'var(--error)'
+                        }}
+                      />
                     </div>
-                  </td>
-                  <td>
-                    <span className={`camera-tag ${isCameraOff ? 'off' : 'on'}`}>
-                      {student.camera}
-                    </span>
-                  </td>
-                  <td className="muted text-sm">{formatUpdateAge(student.lastUpdate, now)}</td>
-                </tr>
-              );
-            })
-          )}
-        </tbody>
-      </table>
+                    <span className="score-label">{Math.round(scoreNum)}%</span>
+                  </div>
+
+                  <span className="status-detail-label">Camera</span>
+                  <span className={`camera-tag ${isCameraOff ? 'off' : 'on'}`}>{student.camera}</span>
+
+                  <span className="status-detail-label">Updated</span>
+                  <span className="muted text-sm">{formatUpdateAge(student.lastUpdate, now)}</span>
+                </div>
+              </article>
+            );
+          })}
+        </div>
+      )}
     </section>
   );
 }
 
-function TeacherVideoGrid({ snapshots }) {
-  const [page, setPage] = useState(0);
+function TeacherVideoGrid({ snapshots, sidebarOpen }) {
+  const [focusedStudentId, setFocusedStudentId] = useState(null);
+  const [swapPip, setSwapPip] = useState(false);
   const cameraOptions = useMemo(() => ({
     includeLocal: false,
     participantFilter: (participant) => getStudentIdentity(participant.identity) !== participant.identity,
   }), []);
   const studentTracks = useCameraTrackItems(cameraOptions);
   const students = useMemo(() => {
-    const byStudentId = new Map();
+    const groups = new Map();
 
-    for (const { participant } of studentTracks) {
-      const studentId = getStudentIdentity(participant.identity);
-      byStudentId.set(studentId, {
-        studentId,
-        status: 'Waiting...',
-        score: 'No data',
-        camera: 'On',
-        lastUpdate: null,
-      });
+    for (const item of studentTracks) {
+      const studentId = getStudentIdentity(item.participant.identity);
+      if (!groups.has(studentId)) {
+        groups.set(studentId, { studentId, participant: item.participant, cameraTrack: null, screenTrack: null, handRaised: false });
+      }
+      const group = groups.get(studentId);
+      if (item.publication.source === Track.Source.Camera) group.cameraTrack = item;
+      if (item.publication.source === Track.Source.ScreenShare) group.screenTrack = item;
+      
+      try {
+        const metadata = JSON.parse(item.participant.metadata || '{}');
+        group.handRaised = metadata.hand_raised === true;
+      } catch {
+        group.handRaised = false;
+      }
     }
 
-    for (const [studentId, score] of Object.entries(snapshots)) {
-      byStudentId.set(studentId, {
-        studentId,
+    for (const studentId of Object.keys(snapshots)) {
+      if (!groups.has(studentId)) {
+        groups.set(studentId, { studentId, participant: null, cameraTrack: null, screenTrack: null, handRaised: false });
+      }
+    }
+
+    const array = Array.from(groups.values());
+    
+    return array.map(g => {
+      const studentId = g.studentId;
+      const score = snapshots[studentId];
+      return {
+        ...g,
         status: score?.status || 'Waiting...',
         score: score ? `${Math.round(score.score)}/100` : 'No data',
-        camera: score?.camera_on ? 'On' : 'Off',
+        scoreNum: score?.score || 0,
+        camera: score ? (score.camera_on ? 'On' : 'Off') : (g.cameraTrack ? 'On' : 'Unknown'),
         lastUpdate: score?.last_update || null,
-      });
-    }
-
-    return Array.from(byStudentId.values()).sort((a, b) => a.studentId.localeCompare(b.studentId));
+        isWarning: !score || score.is_warning
+      };
+    }).sort((a, b) => {
+      if (a.handRaised !== b.handRaised) return a.handRaised ? -1 : 1;
+      return a.studentId.localeCompare(b.studentId);
+    });
   }, [snapshots, studentTracks]);
 
-  const totalPages = Math.max(1, Math.ceil(studentTracks.length / PAGE_SIZE));
-  const currentPage = Math.min(page, totalPages - 1);
-  const pagedTracks = studentTracks.slice(currentPage * PAGE_SIZE, (currentPage + 1) * PAGE_SIZE);
+  const focusedStudent = focusedStudentId ? students.find(s => s.studentId === focusedStudentId) : null;
+
+  if (focusedStudent) {
+    const student = focusedStudent;
+    const hasScreen = !!student.screenTrack;
+    let mainTrack = swapPip ? student.cameraTrack : (hasScreen ? student.screenTrack : student.cameraTrack);
+    let pipTrack = swapPip ? student.screenTrack : (hasScreen ? student.cameraTrack : null);
+    if (student.camera === 'Off' && mainTrack === student.cameraTrack) mainTrack = null;
+    if (student.camera === 'Off' && pipTrack === student.cameraTrack) pipTrack = null;
+    const returnToGrid = () => {
+      setFocusedStudentId(null);
+      setSwapPip(false);
+    };
+
+    return (
+      <div className={`focused-container teacher-focused-container ${sidebarOpen ? 'sidebar-open' : ''}`}>
+        <section className="focus-layout teacher-focus-layout">
+          {mainTrack ? (
+            <article className="main-view" onDoubleClick={returnToGrid}>
+              <AttachedVideo track={mainTrack.track} />
+              <div className="view-overlay">
+                <span>{student.studentId} {mainTrack.publication.source === Track.Source.ScreenShare ? "'s screen" : ""}</span>
+              </div>
+            </article>
+          ) : student.camera === 'Off' ? (
+            <CameraOffTile label={`${student.studentId} camera off`} />
+          ) : (
+            <div className="empty-main screen-center">
+              <p className="muted">No video available for {student.studentId}</p>
+            </div>
+          )}
+
+          {pipTrack && (
+            <article
+              className="pip-view pip-left"
+              onClick={() => setSwapPip(!swapPip)}
+              onDoubleClick={(event) => {
+                event.stopPropagation();
+              }}
+            >
+              <AttachedVideo track={pipTrack.track} />
+            </article>
+          )}
+        </section>
+      </div>
+    );
+  }
 
   return (
-    <>
-      <TeacherStatusTable students={students} />
-
-      <div className="grid-toolbar">
-        <span>{studentTracks.length} camera streams</span>
-        <div className="pager">
-          <button onClick={() => setPage(Math.max(0, currentPage - 1))} disabled={currentPage === 0}>Prev</button>
-          <span>{currentPage + 1} / {totalPages}</span>
-          <button onClick={() => setPage(Math.min(totalPages - 1, currentPage + 1))} disabled={currentPage + 1 >= totalPages}>Next</button>
-        </div>
-      </div>
-
-      <div className="teacher-grid">
-        {pagedTracks.length === 0 ? (
-          <p className="muted">Waiting for student camera streams...</p>
+    <div className={`grid-container teacher-grid-container ${sidebarOpen ? 'sidebar-open' : ''}`}>
+      <div className={`teacher-grid meeting-grid ${getZoomGridClass(students.length)}`}>
+        {students.length === 0 ? (
+          <div className="empty-main screen-center">
+            <p className="muted">Waiting for students...</p>
+          </div>
         ) : (
-          pagedTracks.map(({ id, participant, track }) => {
-            const studentId = getStudentIdentity(participant.identity);
-            const score = snapshots[studentId] || null;
-            const warning = !score || score.is_warning;
+          students.map((student) => {
+            const displayTrack = student.screenTrack || (student.camera === 'Off' ? null : student.cameraTrack);
+            
             return (
-              <article key={id} className={`student-card ${warning ? 'warning' : ''}`}>
-                <header>
-                  <strong>{studentId}</strong>
-                  <div className="card-score-mini">
-                    <div className="mini-bar">
-                      <div 
-                        className="bar-fill" 
-                        style={{ 
-                          width: `${Math.round(score?.score || 0)}%`,
-                          backgroundColor: (score?.score || 0) > 70 ? 'var(--success)' : (score?.score || 0) > 40 ? 'var(--warning)' : 'var(--error)'
-                        }}
-                      />
-                    </div>
-                    <span>{score ? Math.round(score.score) : 0}%</span>
-                  </div>
-                </header>
-                <AttachedVideo track={track} />
-                <footer>
-                  <span className={`status-tag ${(score?.status || 'Waiting') === 'Focused' ? 'success' : 'warning'}`}>
-                    {score?.status || 'Waiting...'}
-                  </span>
-                  {!score?.camera_on && <span className="tag error">Camera Off</span>}
-                </footer>
+              <article
+                key={student.studentId}
+                className={`student-card meeting-tile ${student.handRaised ? 'hand-raised' : ''}`}
+                onClick={() => { setFocusedStudentId(student.studentId); setSwapPip(false); }}
+              >
+                {displayTrack ? (
+                  <AttachedVideo track={displayTrack.track} />
+                ) : student.camera === 'Off' ? (
+                  <CameraOffTile />
+                ) : (
+                  <div className="video-placeholder" />
+                )}
+                <div className="tile-nameplate">
+                  {student.handRaised && <Hand size={16} />}
+                  <span>{student.studentId}</span>
+                </div>
               </article>
             );
           })
         )}
       </div>
-    </>
+    </div>
   );
 }
 
@@ -273,6 +340,7 @@ export default function TeacherDashboard() {
   const [scores, setScores] = useState({});
   const [report, setReport] = useState(null);
   const [error, setError] = useState('');
+  const [sidebarOpen, setSidebarOpen] = useState(false);
 
   useEffect(() => {
     if (!session?.session_token || !roomId) return;
@@ -326,20 +394,14 @@ export default function TeacherDashboard() {
   }
 
   return (
-    <main className="teacher-layout">
-      <header className="teacher-header panel">
-        <div>
-          <h1>Teacher Dashboard</h1>
-          <p className="muted">
-            Room <strong>{roomId}</strong> | Invite: <code>{session.invitation_link}</code>
-          </p>
-        </div>
-        <div className="header-actions">
-          <button onClick={handleEndClass}>End class and report</button>
-        </div>
-      </header>
-
-      {error && <p className="error-text">{error}</p>}
+    <main className="teacher-room-fullscreen">
+      <div className="room-info-chip teacher-room-info">
+        <span>Room <strong>{roomId}</strong></span>
+        <span className="muted">|</span>
+        <code>{session.invitation_link}</code>
+      </div>
+      <button className="teacher-end-button" onClick={handleEndClass}>End class and report</button>
+      {error && <p className="error-text floating-error">{error}</p>}
 
       <LiveKitRoom
         key={`teacher-room-${roomId}`}
@@ -355,7 +417,32 @@ export default function TeacherDashboard() {
         }}
         className="room-shell"
       >
-        <TeacherVideoGrid snapshots={scores} />
+        <div className="teacher-workspace">
+          <TeacherVideoGrid snapshots={scores} sidebarOpen={sidebarOpen} />
+          
+          <aside className={`teacher-sidebar ${sidebarOpen ? 'open' : ''}`}>
+            <TeacherStatusTable students={Object.values(scores).map(score => ({
+               studentId: score.student_id,
+               status: score.status,
+               score: score.score,
+               camera: score.camera_on ? 'On' : 'Off',
+               lastUpdate: score.last_update
+            }))} />
+          </aside>
+        </div>
+
+        <div className="room-controls">
+          <ControlBar variation="minimal" controls={{ microphone: true, camera: true, screenShare: true, chat: false }} />
+          <div className="divider" />
+          <button 
+            className={`lk-button toggle-sidebar-btn ${sidebarOpen ? 'active' : ''}`} 
+            onClick={() => setSidebarOpen(!sidebarOpen)}
+            title="Toggle Status Sidebar"
+          >
+            {sidebarOpen ? <PanelRightClose size={18} /> : <PanelRightOpen size={18} />}
+            <span>Status</span>
+          </button>
+        </div>
       </LiveKitRoom>
 
       {report && (
