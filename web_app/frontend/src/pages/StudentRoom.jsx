@@ -95,7 +95,8 @@ function StudentAiPipeline({ session, roomId, studentId, setError, setRoomClosed
   const captureTimerRef = useRef(null);
   const lastScoreRef = useRef(100);
   const lastStatusRef = useRef('Focused');
-  const cameraEnabledRef = useRef(isCameraEnabled);
+  const cameraEnabledRef   = useRef(true);   // Optimistic: assume camera on (LiveKit initialises asynchronously)
+  const cameraWasActiveRef  = useRef(false);  // Becomes true once camera confirmed active
 
   const sendScoreUpdate = useCallback((cameraOn = cameraEnabledRef.current) => {
     if (wsRef.current?.readyState !== WebSocket.OPEN) return;
@@ -112,7 +113,17 @@ function StudentAiPipeline({ session, roomId, studentId, setError, setRoomClosed
 
   useEffect(() => {
     cameraEnabledRef.current = isCameraEnabled;
-    sendScoreUpdate(isCameraEnabled);
+
+    if (isCameraEnabled) {
+      // Camera is confirmed active – mark it and broadcast immediately
+      cameraWasActiveRef.current = true;
+      sendScoreUpdate(true);
+    } else if (cameraWasActiveRef.current) {
+      // Camera was active before and user explicitly turned it off – broadcast the change
+      sendScoreUpdate(false);
+    }
+    // If camera was never confirmed active (still initialising), do nothing:
+    // ws.onopen will send the correct state once we know it.
   }, [isCameraEnabled, sendScoreUpdate]);
 
   useEffect(() => {
@@ -210,7 +221,11 @@ function StudentAiPipeline({ session, roomId, studentId, setError, setRoomClosed
     const wsBase = (import.meta.env.VITE_API_WS_BASE || 'ws://localhost:8000').replace(/\/$/, '');
     const ws = new WebSocket(`${wsBase}/ws/student/${roomId}/${encodeURIComponent(studentId)}`);
     wsRef.current = ws;
-    ws.onopen = () => sendScoreUpdate(cameraEnabledRef.current);
+    ws.onopen = () => {
+      // Send initial state; if camera hasn't been confirmed active yet, use optimistic true.
+      // The isCameraEnabled effect will correct this as soon as LiveKit confirms camera state.
+      sendScoreUpdate(cameraWasActiveRef.current ? cameraEnabledRef.current : true);
+    };
     ws.onerror = () => setError(`Score WebSocket failed (${wsBase})`);
     ws.onmessage = (event) => {
       try {
