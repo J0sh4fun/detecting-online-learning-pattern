@@ -1,13 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
-import { LiveKitRoom, useRoomContext, ControlBar } from '@livekit/components-react';
+import { LiveKitRoom, useRoomContext, ControlBar, useTracks, VideoTrack } from '@livekit/components-react';
 import { RoomEvent, Track } from 'livekit-client';
 import { Hand, PanelRightClose, PanelRightOpen } from 'lucide-react';
 import '@livekit/components-styles';
 import { endRoom } from '../lib/api';
 import { getSession } from '../lib/sessionStore';
 import ReportView from './ReportView';
-import { VideoTrack } from '@livekit/components-react';
 
 function formatUpdateAge(value, now) {
   if (!value) return 'No update';
@@ -134,7 +133,7 @@ function TeacherStatusTable({ students }) {
   const [now, setNow] = useState(() => Date.now());
 
   useEffect(() => {
-    const timer = window.setInterval(() => setNow(Date.now()), 500);
+    const timer = window.setInterval(() => setNow(Date.now()), 1000);
     return () => window.clearInterval(timer);
   }, []);
 
@@ -197,40 +196,57 @@ function TeacherStatusTable({ students }) {
 function TeacherVideoGrid({ snapshots, sidebarOpen }) {
   const [focusedStudentId, setFocusedStudentId] = useState(null);
   const [swapPip, setSwapPip] = useState(false);
-  const cameraOptions = useMemo(() => ({
-    includeLocal: false,
-    participantFilter: (participant) => getStudentIdentity(participant.identity) !== participant.identity,
-  }), []);
-  const studentTracks = useCameraTrackItems(cameraOptions);
+
+  // 1. Let LiveKit do the heavy lifting safely.
+  // This completely replaces useCameraTrackItems and getCameraTrackItems.
+  const rawTracks = useTracks(
+    [Track.Source.Camera, Track.Source.ScreenShare],
+    { onlySubscribed: true }
+  );
+
   const students = useMemo(() => {
     const groups = new Map();
 
-    for (const item of studentTracks) {
-      const studentId = getStudentIdentity(item.participant.identity);
+    // 2. Map the highly stable rawTracks to your custom groups
+    for (const trackRef of rawTracks) {
+      const identity = trackRef.participant.identity || '';
+
+      // CRITICAL: Make absolutely sure your backend token generation 
+      // actually prepends "student-" to the student identities!
+      if (!identity.startsWith('student-')) continue;
+
+      const studentId = getStudentIdentity(identity);
+
       if (!groups.has(studentId)) {
-        groups.set(studentId, { studentId, participant: item.participant, cameraTrack: null, screenTrack: null, handRaised: false });
+        groups.set(studentId, {
+          studentId,
+          participant: trackRef.participant,
+          cameraTrack: null,
+          screenTrack: null,
+          handRaised: false
+        });
       }
+
       const group = groups.get(studentId);
-      if (item.publication.source === Track.Source.Camera) group.cameraTrack = item;
-      if (item.publication.source === Track.Source.ScreenShare) group.screenTrack = item;
+      if (trackRef.source === Track.Source.Camera) group.cameraTrack = trackRef;
+      if (trackRef.source === Track.Source.ScreenShare) group.screenTrack = trackRef;
 
       try {
-        const metadata = JSON.parse(item.participant.metadata || '{}');
+        const metadata = JSON.parse(trackRef.participant.metadata || '{}');
         group.handRaised = metadata.hand_raised === true;
       } catch {
         group.handRaised = false;
       }
     }
 
+    // 3. Merge in the FastAPI WebSocket snapshots
     for (const studentId of Object.keys(snapshots)) {
       if (!groups.has(studentId)) {
         groups.set(studentId, { studentId, participant: null, cameraTrack: null, screenTrack: null, handRaised: false });
       }
     }
 
-    const array = Array.from(groups.values());
-
-    return array.map(g => {
+    return Array.from(groups.values()).map(g => {
       const studentId = g.studentId;
       const score = snapshots[studentId];
       return {
@@ -246,7 +262,7 @@ function TeacherVideoGrid({ snapshots, sidebarOpen }) {
       if (a.handRaised !== b.handRaised) return a.handRaised ? -1 : 1;
       return a.studentId.localeCompare(b.studentId);
     });
-  }, [snapshots, studentTracks]);
+  }, [snapshots, rawTracks]);
 
   const focusedStudent = focusedStudentId ? students.find(s => s.studentId === focusedStudentId) : null;
 
@@ -314,7 +330,7 @@ function TeacherVideoGrid({ snapshots, sidebarOpen }) {
                 onClick={() => { setFocusedStudentId(student.studentId); setSwapPip(false); }}
               >
                 {displayTrack ? (
-                  <VideoTrack trackRef={{ participant: student.participant, publication: displayTrack.publication, source: displayTrack.publication.source }} />
+                  <VideoTrack trackRef={displayTrack} />
                 ) : student.camera === 'Off' ? (
                   <CameraOffTile />
                 ) : (
