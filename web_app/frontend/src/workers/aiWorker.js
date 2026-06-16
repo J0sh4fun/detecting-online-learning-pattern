@@ -57,12 +57,12 @@ const FEATURE_SCALE = [
 ];
 
 const SCORE_BY_LABEL = {
-  Focused: 100,
-  Slouching: 70,
+  'Focused': 100,
+  'Slouching': 70,
   'Leaning on Desk': 45,
   'Looking Away': 30,
   'Using Phone': 20,
-  Absence: 5,
+  'Absence': 5,
 };
 
 let postureSession = null;
