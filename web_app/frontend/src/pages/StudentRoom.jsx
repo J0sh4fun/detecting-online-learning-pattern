@@ -130,15 +130,42 @@ function StudentAiPipeline({ session, roomId, studentId, setError, setRoomClosed
     });
     faceMesh.setOptions({ maxNumFaces: 1, refineLandmarks: true, minDetectionConfidence: 0.5 });
 
+    // lastPoseResults and lastFaceResults are updated by their respective
+    // model callbacks. Both are captured AFTER both awaits in captureFrame
+    // complete, which guarantees pose.onResults has had a chance to fire
+    // before we dispatch to the worker — eliminating the race condition.
     let lastPoseResults = null;
+    let lastFaceResults = null;
     pose.onResults((results) => { lastPoseResults = results.poseLandmarks; });
+    faceMesh.onResults((results) => { lastFaceResults = results.multiFaceLandmarks?.[0] ?? null; });
 
     const captureFrame = async () => {
       if (disposed) return;
       if (hiddenVideoRef.current && hiddenVideoRef.current.readyState >= 2) {
         try {
+          // Send to both models sequentially on the SAME frame.
+          // After both awaits return, both onResults callbacks above have
+          // already been called and lastPoseResults / lastFaceResults are
+          // up to date for this frame. Only then do we dispatch to the worker.
           await pose.send({ image: hiddenVideoRef.current });
           await faceMesh.send({ image: hiddenVideoRef.current });
+
+          if (workerRef.current) {
+            let frameBitmap = null;
+            try {
+              frameBitmap = await createImageBitmap(hiddenVideoRef.current);
+            } catch {
+              // Skip ImageBitmap creation on transient errors.
+            }
+            workerRef.current.postMessage({
+              type: 'process_landmarks',
+              landmarks: lastPoseResults,
+              faceLandmarks: lastFaceResults,
+              width: hiddenVideoRef.current?.videoWidth || 640,
+              height: hiddenVideoRef.current?.videoHeight || 480,
+              frame: frameBitmap,
+            }, frameBitmap ? [frameBitmap] : []);
+          }
         } catch {
           // Keep loop alive on transient frame processing errors.
         }
@@ -156,26 +183,6 @@ function StudentAiPipeline({ session, roomId, studentId, setError, setRoomClosed
       maxHistory: 6,
     });
 
-    faceMesh.onResults(async (results) => {
-      if (workerRef.current) {
-        let frameBitmap = null;
-        if (hiddenVideoRef.current && hiddenVideoRef.current.readyState >= 2) {
-          try {
-            frameBitmap = await createImageBitmap(hiddenVideoRef.current);
-          } catch {
-            // Skip this frame if ImageBitmap creation fails.
-          }
-        }
-        workerRef.current.postMessage({
-          type: 'process_landmarks',
-          landmarks: lastPoseResults, // Might be null, worker handles it
-          faceLandmarks: results.multiFaceLandmarks?.[0],
-          width: hiddenVideoRef.current?.videoWidth || 640,
-          height: hiddenVideoRef.current?.videoHeight || 480,
-          frame: frameBitmap
-        }, frameBitmap ? [frameBitmap] : []);
-      }
-    });
     captureTimerRef.current = setTimeout(captureFrame, 200);
 
     worker.onmessage = (event) => {
@@ -357,6 +364,7 @@ export default function StudentRoom() {
         connect
         video
         audio={true}
+        onDisconnected={() => navigate('/')}
         onError={(err) => setError(`LiveKit connection failed: ${err?.message || 'Unknown error'}`)}
         onMediaDeviceFailure={(failure, kind) => {
           setError(`Cannot start ${kind || 'media device'}: ${failure || 'permission or device error'}`);

@@ -156,6 +156,12 @@ class RoomStore:
         students = self._live_cache.get(room_code, {})
         return sorted(students.values(), key=lambda item: item.student_id.lower())
 
+    def remove_student_from_cache(self, room_code: str, student_id: str) -> None:
+        """Remove a student from the live cache when they disconnect."""
+        room_cache = self._live_cache.get(room_code)
+        if room_cache:
+            room_cache.pop(student_id, None)
+
     async def end_room(self, db: AsyncSession, room_code: str) -> Room | None:
         room = await self.get_room(db, room_code)
         if room:

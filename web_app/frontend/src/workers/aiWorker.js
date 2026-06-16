@@ -161,15 +161,27 @@ async function initWorker(config) {
 async function classify(frame) {
   if (!postureSession) return null;
 
-  if (!latestLandmarks || latestLandmarks.length === 0) {
+  const poseAbsent = !latestLandmarks || latestLandmarks.length === 0;
+  const faceAbsent = !latestFaceLandmarks || latestFaceLandmarks.length === 0;
+
+  if (poseAbsent && faceAbsent) {
     pushLabel('Absence');
     return { label: 'Absence', score: SCORE_BY_LABEL.Absence };
+  }
+
+  if (poseAbsent) {
+    pushLabel('Focused');
+    return { label: 'Focused', score: SCORE_BY_LABEL.Focused };
   }
 
   const visibilityNose = latestLandmarks[0]?.visibility ?? 0;
   const visibilityLeftShoulder = latestLandmarks[11]?.visibility ?? 0;
   const visibilityRightShoulder = latestLandmarks[12]?.visibility ?? 0;
   if (visibilityNose < 0.2 || (visibilityLeftShoulder < 0.2 && visibilityRightShoulder < 0.2)) {
+    if (!faceAbsent) {
+      pushLabel('Focused');
+      return { label: 'Focused', score: SCORE_BY_LABEL.Focused };
+    }
     pushLabel('Absence');
     return { label: 'Absence', score: SCORE_BY_LABEL.Absence };
   }

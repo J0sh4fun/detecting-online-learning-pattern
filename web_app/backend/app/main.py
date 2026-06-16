@@ -257,21 +257,18 @@ async def student_scores_socket(
             await socket_manager.broadcast_snapshot(room_code)
     except WebSocketDisconnect:
         socket_manager.disconnect_student(room_code, student_id)
-        if user_id:
-            res = await db.execute(select(User).filter(User.username == student_id))
-            user = res.scalar_one_or_none()
-            if user:
-                # Update status to offline
-                await store.update_student_score(
-                    db, room_code=room_code, user_id=user.id, display_id=student_id,
-                    average_score=100.0, status="Camera Off", camera_on=False, client_sent_at=datetime.now(timezone.utc).timestamp()
-                )
+        store.remove_student_from_cache(room_code, student_id)
         await socket_manager.broadcast_snapshot(room_code)
     except Exception as e:
         import traceback
         traceback.print_exc()
         socket_manager.disconnect_student(room_code, student_id)
-        await websocket.close(code=4400, reason="Malformed payload")
+        store.remove_student_from_cache(room_code, student_id)
+        await socket_manager.broadcast_snapshot(room_code)
+        try:
+            await websocket.close(code=4400, reason="Malformed payload")
+        except Exception:
+            pass
 
 
 @app.post("/api/verify/frame", response_model=VerifyFrameResponse)
