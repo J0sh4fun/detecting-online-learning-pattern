@@ -283,26 +283,44 @@ function StudentAiPipeline({ session, roomId, studentId, setError, setRoomClosed
 
 function RaiseHandButton() {
   const { localParticipant } = useLocalParticipant();
-  let metadata = {};
-  if (localParticipant?.metadata) {
-    try {
-      metadata = JSON.parse(localParticipant.metadata);
-    } catch {
-      metadata = {};
-    }
-  }
 
-  const isRaised = metadata.hand_raised === true;
+  // Use local state so the button toggles immediately on click.
+  // localParticipant.metadata is NOT synchronously updated after setMetadata(),
+  // so reading it back for isRaised would leave the button stuck.
+  const [isRaised, setIsRaised] = useState(() => {
+    try { return JSON.parse(localParticipant?.metadata || '{}').hand_raised === true; } catch { return false; }
+  });
+
+  // Keep in sync if metadata is updated externally (e.g. teacher clears hand raise)
+  useEffect(() => {
+    if (!localParticipant) return undefined;
+    const onMetadata = () => {
+      try {
+        const value = JSON.parse(localParticipant.metadata || '{}').hand_raised === true;
+        setIsRaised(value);
+      } catch {
+        setIsRaised(false);
+      }
+    };
+    localParticipant.on('metadataChanged', onMetadata);
+    return () => localParticipant.off('metadataChanged', onMetadata);
+  }, [localParticipant]);
 
   const toggleHand = () => {
     if (!localParticipant) return;
-    const newMetadata = JSON.stringify({ ...metadata, hand_raised: !isRaised });
-    localParticipant.setMetadata(newMetadata);
+    const next = !isRaised;
+    setIsRaised(next);  // Optimistic update — button responds instantly
+    try {
+      const current = JSON.parse(localParticipant.metadata || '{}');
+      localParticipant.setMetadata(JSON.stringify({ ...current, hand_raised: next }));
+    } catch {
+      localParticipant.setMetadata(JSON.stringify({ hand_raised: next }));
+    }
   };
 
   return (
-    <button 
-      className={`lk-button raise-hand-btn ${isRaised ? 'active' : ''}`} 
+    <button
+      className={`lk-button raise-hand-btn ${isRaised ? 'active' : ''}`}
       onClick={toggleHand}
       title={isRaised ? 'Lower Hand' : 'Raise Hand'}
     >
@@ -311,6 +329,7 @@ function RaiseHandButton() {
     </button>
   );
 }
+
 
 function StudentFocusLayout() {
   const tracks = useCameraTrackItems(useMemo(() => ({ includeLocal: true }), []));
