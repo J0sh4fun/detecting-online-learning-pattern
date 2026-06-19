@@ -23,6 +23,7 @@ services:
     volumes:
       - ./backend:/app
       - ../model_pipeline:/model_pipeline:ro
+      - active_rooms_data:/app/data
     depends_on:
       mysql:
         condition: service_healthy  # đợi MySQL sẵn sàng thực sự, không chỉ container started
@@ -67,3 +68,4 @@ services:
 
 volumes:
   mysql_data:
+  active_rooms_data:

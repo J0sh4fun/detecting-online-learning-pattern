@@ -394,25 +394,13 @@ async def end_room(
     if claims.get("role") != "teacher" or claims.get("room_code") != room_code:
         raise HTTPException(status_code=403, detail="Invalid teacher token")
 
-    # Generate report before ending
-    report = await get_room_report(room_code, token, db, current_user)
-
     await store.end_room(db, room_code)
     await socket_manager.broadcast_to_students(
         room_code, {"type": "room_closed", "teacher_id": current_user.username}
     )
 
-    # Save report to DB
-    db_report = RoomReport(
-        room_id=room.id,
-        class_average_score=report.class_average_score,
-        total_students=len(report.students),
-        student_summaries=report.model_dump(mode="json")["students"],
-    )
-    db.add(db_report)
-    await db.commit()
-
-    return report
+    # Return the newly created report from DB
+    return await get_room_report(room_code, token, db, current_user)
 
 
 @app.get("/api/rooms/{room_code}/report", response_model=RoomReportResponse)
@@ -423,7 +411,10 @@ async def get_room_report(
     current_user: User = Depends(get_current_user)
 ) -> RoomReportResponse:
     room_code = room_code.strip().upper()
-    room = await store.get_room(db, room_code)
+    from sqlalchemy import select
+    from app.models.models import Room
+    res = await db.execute(select(Room).filter(Room.room_code == room_code))
+    room = res.scalar_one_or_none()
     if not room:
         raise _room_not_found(room_code)
 
@@ -448,27 +439,39 @@ async def get_room_report(
             students=saved_report.student_summaries,
         )
 
-    # Generate live report from DB
-    from app.models.models import RoomParticipant, FocusScore
-    from sqlalchemy.orm import selectinload
+    # Generate live report from JSONL
+    import os
+    import json
+    from collections import defaultdict
+    from app.models.models import RoomParticipant
 
     part_res = await db.execute(
         select(RoomParticipant)
-        .filter(RoomParticipant.room_id == room.id)  # role filter removed — all participants are students
-        .options(selectinload(RoomParticipant.scores))
+        .filter(RoomParticipant.room_id == room.id)
     )
     participants = part_res.scalars().all()
+
+    filepath = os.path.join(settings.active_rooms_dir, f"{room_code}.jsonl")
+    student_records = defaultdict(list)
+    if os.path.exists(filepath):
+        with open(filepath, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if line:
+                    try:
+                        data = json.loads(line)
+                        student_records[data["display_id"]].append(data)
+                    except Exception:
+                        pass
 
     reports: list[StudentReport] = []
     class_total = 0.0
     for participant in participants:
-        samples = participant.scores
-        samples.sort(key=lambda s: s.recorded_at)
-        
+        samples = student_records.get(participant.display_id, [])
         avg = (
-            sum(sample.score for sample in samples) / len(samples)
+            sum(sample["score"] for sample in samples) / len(samples)
             if samples
-            else 0.0  # current_score removed from DB — fallback to 0.0 if no samples yet
+            else 0.0
         )
         class_total += avg
         reports.append(
@@ -477,10 +480,10 @@ async def get_room_report(
                 average_score=round(avg, 2),
                 timeline=[
                     StudentTimelinePoint(
-                        timestamp=sample.recorded_at.replace(tzinfo=timezone.utc),
-                        score=sample.score,
-                        status=sample.status_label,
-                        camera_on=sample.camera_on,
+                        timestamp=datetime.fromisoformat(sample["recorded_at"]),
+                        score=sample["score"],
+                        status=sample["status"],
+                        camera_on=sample["camera_on"],
                     )
                     for sample in samples
                 ],

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+import os
 import secrets
 import string
 from collections import defaultdict
@@ -11,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.core.config import settings
-from app.models.models import FocusScore, Room, RoomParticipant, RoomStatusEnum, VerificationFlag
+from app.models.models import Room, RoomParticipant, RoomReport, RoomStatusEnum, VerificationFlag
 
 
 @dataclass
@@ -26,6 +28,7 @@ class StudentLiveStatus:
 
 class RoomStore:
     def __init__(self) -> None:
+        os.makedirs(settings.active_rooms_dir, exist_ok=True)
         # In-memory cache for live broadcast performance
         # room_code -> { student_id_str: StudentLiveStatus }
         self._live_cache: dict[str, dict[str, StudentLiveStatus]] = defaultdict(dict)
@@ -124,15 +127,20 @@ class RoomStore:
         participant.last_score_update = now
         participant.last_ingest_epoch = client_sent_at
 
-        score_entry = FocusScore(
-            participant_id=participant.id,
-            room_id=room.id,
-            score=average_score,
-            status_label=status,
-            camera_on=camera_on,
-            recorded_at=now,
-        )
-        db.add(score_entry)
+        # Append to JSONL instead of DB
+        filepath = os.path.join(settings.active_rooms_dir, f"{room_code}.jsonl")
+        try:
+            with open(filepath, "a", encoding="utf-8") as f:
+                f.write(json.dumps({
+                    "display_id": display_id,
+                    "score": average_score,
+                    "status": status,
+                    "camera_on": camera_on,
+                    "recorded_at": now.isoformat()
+                }) + "\n")
+        except Exception as e:
+            print(f"Error writing to {filepath}: {e}")
+
         await db.commit()
         await db.refresh(participant)
 
@@ -173,11 +181,69 @@ class RoomStore:
             await db.commit()
 
     async def end_room(self, db: AsyncSession, room_code: str) -> Room | None:
-        room = await self.get_room(db, room_code)
+        res = await db.execute(
+            select(Room)
+            .options(selectinload(Room.participants))
+            .filter(Room.room_code == room_code, Room.status == RoomStatusEnum.active)
+        )
+        room = res.scalar_one_or_none()
         if room:
             room.status = RoomStatusEnum.ended
             room.ended_at = datetime.now(timezone.utc)
+            
+            # Process JSONL and create RoomReport
+            filepath = os.path.join(settings.active_rooms_dir, f"{room_code}.jsonl")
+            student_records = defaultdict(list)
+            if os.path.exists(filepath):
+                with open(filepath, "r", encoding="utf-8") as f:
+                    for line in f:
+                        line = line.strip()
+                        if line:
+                            try:
+                                data = json.loads(line)
+                                student_records[data["display_id"]].append(data)
+                            except Exception:
+                                pass
+            
+            reports = []
+            class_total = 0.0
+            participants = list(room.participants)
+            
+            for participant in sorted(participants, key=lambda item: item.display_id.lower()):
+                samples = student_records.get(participant.display_id, [])
+                avg = sum(s["score"] for s in samples) / len(samples) if samples else 0.0
+                class_total += avg
+                
+                reports.append({
+                    "student_id": participant.display_id,
+                    "average_score": round(avg, 2),
+                    "timeline": [
+                        {
+                            "timestamp": s["recorded_at"],
+                            "score": s["score"],
+                            "status": s["status"],
+                            "camera_on": s["camera_on"]
+                        }
+                        for s in samples
+                    ]
+                })
+                
+            class_avg = round(class_total / len(participants), 2) if participants else 0.0
+            
+            db_report = RoomReport(
+                room_id=room.id,
+                class_average_score=class_avg,
+                total_students=len(participants),
+                student_summaries=reports,
+            )
+            db.add(db_report)
             await db.commit()
+            
+            if os.path.exists(filepath):
+                try:
+                    os.remove(filepath)
+                except Exception as e:
+                    print(f"Error removing {filepath}: {e}")
             
             # Clean up cache
             self._live_cache.pop(room_code, None)

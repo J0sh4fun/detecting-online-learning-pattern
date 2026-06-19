@@ -49,7 +49,6 @@ class Room(Base):
 
     teacher = relationship("User", back_populates="rooms")
     participants = relationship("RoomParticipant", back_populates="room", cascade="all, delete")
-    scores = relationship("FocusScore", back_populates="room", cascade="all, delete")
     verification_flags = relationship("VerificationFlag", back_populates="room", cascade="all, delete")
     report = relationship("RoomReport", back_populates="room", uselist=False, cascade="all, delete")
 
@@ -70,23 +69,7 @@ class RoomParticipant(Base):
 
     room = relationship("Room", back_populates="participants")
     user = relationship("User", back_populates="participations")
-    scores = relationship("FocusScore", back_populates="participant", cascade="all, delete")
     verification_flags = relationship("VerificationFlag", back_populates="participant", cascade="all, delete")
-
-
-class FocusScore(Base):
-    __tablename__ = "focus_scores"
-
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    participant_id = Column(Integer, ForeignKey("room_participants.id", ondelete="CASCADE"), nullable=False, index=True)
-    room_id = Column(Integer, ForeignKey("rooms.id", ondelete="CASCADE"), nullable=False, index=True)
-    score = Column(Float, nullable=False)
-    status_label = Column(String(80), nullable=False)
-    camera_on = Column(Boolean, nullable=False)
-    recorded_at = Column(DateTime, default=func.now(), nullable=False, index=True)
-
-    participant = relationship("RoomParticipant", back_populates="scores")
-    room = relationship("Room", back_populates="scores")
 
 
 class VerificationFlag(Base):

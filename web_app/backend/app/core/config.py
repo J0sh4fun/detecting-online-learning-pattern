@@ -30,6 +30,7 @@ class Settings:
     score_low_threshold: float = float(os.getenv("SCORE_LOW_THRESHOLD", "55"))
     verify_discrepancy_threshold: float = float(os.getenv("VERIFY_DISCREPANCY_THRESHOLD", "25"))
     database_url: str = os.getenv("DATABASE_URL", "mysql+aiomysql://root:focusdev@localhost:3306/focus_classroom")
+    active_rooms_dir: str = os.getenv("ACTIVE_ROOMS_DIR", "/app/data/active_rooms")
 
     @property
     def project_root(self) -> Path:

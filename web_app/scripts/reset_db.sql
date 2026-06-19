@@ -80,24 +80,7 @@ CREATE TABLE room_participants (
     CONSTRAINT fk_rp_user FOREIGN KEY (user_id) REFERENCES users(id)  ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
--- ────────────────────────────────────────────────────────────
--- focus_scores  (không thay đổi)
--- ────────────────────────────────────────────────────────────
-CREATE TABLE focus_scores (
-    id             INT         NOT NULL AUTO_INCREMENT,
-    participant_id INT         NOT NULL,
-    room_id        INT         NOT NULL,
-    score          FLOAT       NOT NULL,
-    status_label   VARCHAR(80) NOT NULL,
-    camera_on      TINYINT(1)  NOT NULL,
-    recorded_at    DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    PRIMARY KEY (id),
-    INDEX idx_participant_id (participant_id),
-    INDEX idx_room_id        (room_id),
-    INDEX idx_recorded_at    (recorded_at),
-    CONSTRAINT fk_fs_participant FOREIGN KEY (participant_id) REFERENCES room_participants(id) ON DELETE CASCADE,
-    CONSTRAINT fk_fs_room        FOREIGN KEY (room_id)        REFERENCES rooms(id)             ON DELETE CASCADE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
 
 -- ────────────────────────────────────────────────────────────
 -- verification_flags  (không thay đổi)
