@@ -24,7 +24,8 @@ services:
       - ./backend:/app
       - ../model_pipeline:/model_pipeline:ro
     depends_on:
-      - mysql
+      mysql:
+        condition: service_healthy  # đợi MySQL sẵn sàng thực sự, không chỉ container started
     command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
     restart: unless-stopped
 
@@ -56,6 +57,12 @@ services:
       MYSQL_DATABASE: focus_classroom
     volumes:
       - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-pfocusdev"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 10s
     restart: unless-stopped
 
 volumes:

@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.core.config import settings
-from app.models.models import FocusScore, RoleEnum, Room, RoomParticipant, RoomStatusEnum, VerificationFlag
+from app.models.models import FocusScore, Room, RoomParticipant, RoomStatusEnum, VerificationFlag
 
 
 @dataclass
@@ -77,7 +77,6 @@ class RoomStore:
                 room_id=room_id,
                 user_id=user_id,
                 display_id=display_id,
-                role=RoleEnum.student,
             )
             db.add(participant)
             await db.commit()
@@ -121,9 +120,7 @@ class RoomStore:
             return participant
 
         now = datetime.now(timezone.utc)
-        participant.current_score = average_score
-        participant.current_status = status
-        participant.camera_on = camera_on
+        # Only persist throttle metadata — live state lives in _live_cache
         participant.last_score_update = now
         participant.last_ingest_epoch = client_sent_at
 
@@ -161,6 +158,19 @@ class RoomStore:
         room_cache = self._live_cache.get(room_code)
         if room_cache:
             room_cache.pop(student_id, None)
+
+    async def set_student_left(self, db: AsyncSession, *, room_id: int, user_id: int) -> None:
+        """Record left_at timestamp when a student disconnects."""
+        res = await db.execute(
+            select(RoomParticipant).filter(
+                RoomParticipant.room_id == room_id,
+                RoomParticipant.user_id == user_id,
+            )
+        )
+        participant = res.scalar_one_or_none()
+        if participant and participant.left_at is None:
+            participant.left_at = datetime.now(timezone.utc)
+            await db.commit()
 
     async def end_room(self, db: AsyncSession, room_code: str) -> Room | None:
         room = await self.get_room(db, room_code)

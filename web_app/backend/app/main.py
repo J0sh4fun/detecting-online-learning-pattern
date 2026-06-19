@@ -9,6 +9,7 @@ import cv2
 import numpy as np
 from fastapi import FastAPI, HTTPException, Query, Response, WebSocket, WebSocketDisconnect, Depends
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -39,6 +40,12 @@ from app.ws.manager import socket_manager
 async def lifespan(app: FastAPI):
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        # Solution B: dọn dẹp zombie rooms từ session trước khi server restart
+        result = await conn.execute(
+            text("UPDATE rooms SET status='ended', ended_at=NOW() WHERE status='active'")
+        )
+        if result.rowcount > 0:
+            print(f"[startup] 🧹 Cleaned up {result.rowcount} zombie room(s) from previous session")
     yield
 
 app = FastAPI(title=settings.api_title, lifespan=lifespan)
@@ -82,6 +89,20 @@ def _validate_socket_identity(*, token: str, room_code: str, role: str, particip
         raise ValueError("Token role mismatch")
     if participant_id and claims.get("participant_id") != participant_id:
         raise ValueError("Token participant mismatch")
+
+
+async def _auto_end_room(db: AsyncSession, room_code: str) -> None:
+    """Automatically end a room when all teachers disconnect.
+    
+    The room report will be generated lazily when accessed via history.
+    """
+    room = await store.end_room(db, room_code)
+    if room:
+        print(f"[auto_end] 🚪 Room '{room_code}' ended — teacher disconnected")
+        await socket_manager.broadcast_to_students(
+            room_code,
+            {"type": "room_closed", "reason": "teacher_disconnected"},
+        )
 
 
 @app.get("/health")
@@ -201,9 +222,15 @@ async def teacher_scores_socket(
     await socket_manager.connect_teacher(room_code, websocket)
     try:
         while True:
+            # Không có timeout — giáo viên đóng tab/rời phòng sẽ trigger WebSocketDisconnect
             await websocket.receive_text()
     except WebSocketDisconnect:
+        pass
+    finally:
         socket_manager.disconnect_teacher(room_code, websocket)
+        # Chỉ end room khi không còn teacher nào kết nối (tránh end khi teacher reload tab)
+        if not socket_manager.teacher_sockets.get(room_code):
+            await _auto_end_room(db, room_code)
 
 
 @app.websocket("/ws/student/{room_code}/{student_id}")
@@ -258,12 +285,16 @@ async def student_scores_socket(
     except WebSocketDisconnect:
         socket_manager.disconnect_student(room_code, student_id)
         store.remove_student_from_cache(room_code, student_id)
+        if user_id:
+            await store.set_student_left(db, room_id=room.id, user_id=user_id)
         await socket_manager.broadcast_snapshot(room_code)
     except Exception as e:
         import traceback
         traceback.print_exc()
         socket_manager.disconnect_student(room_code, student_id)
         store.remove_student_from_cache(room_code, student_id)
+        if user_id:
+            await store.set_student_left(db, room_id=room.id, user_id=user_id)
         await socket_manager.broadcast_snapshot(room_code)
         try:
             await websocket.close(code=4400, reason="Malformed payload")
@@ -422,7 +453,9 @@ async def get_room_report(
     from sqlalchemy.orm import selectinload
 
     part_res = await db.execute(
-        select(RoomParticipant).filter(RoomParticipant.room_id == room.id, RoomParticipant.role == "student").options(selectinload(RoomParticipant.scores))
+        select(RoomParticipant)
+        .filter(RoomParticipant.room_id == room.id)  # role filter removed — all participants are students
+        .options(selectinload(RoomParticipant.scores))
     )
     participants = part_res.scalars().all()
 
@@ -435,7 +468,7 @@ async def get_room_report(
         avg = (
             sum(sample.score for sample in samples) / len(samples)
             if samples
-            else participant.current_score
+            else 0.0  # current_score removed from DB — fallback to 0.0 if no samples yet
         )
         class_total += avg
         reports.append(

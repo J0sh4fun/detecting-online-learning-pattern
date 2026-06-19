@@ -25,18 +25,15 @@ def build_report_response(room: Room, teacher_name: str, generated_at: datetime)
     reports: list[StudentReport] = []
     class_total = 0.0
 
-    participants = [
-        participant
-        for participant in room.participants
-        if participant.role.value == "student"
-    ]
+    # All participants are students — role column has been removed
+    participants = list(room.participants)
 
     for participant in sorted(participants, key=lambda item: item.display_id.lower()):
         samples = sorted(participant.scores, key=lambda sample: sample.recorded_at)
         avg = (
             sum(sample.score for sample in samples) / len(samples)
             if samples
-            else participant.current_score
+            else 0.0  # current_score removed from DB — no samples means student never sent data
         )
         class_total += avg
         reports.append(

@@ -61,10 +61,8 @@ class RoomParticipant(Base):
     room_id = Column(Integer, ForeignKey("rooms.id", ondelete="CASCADE"), nullable=False, index=True)
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     display_id = Column(String(64), nullable=False)
-    role = Column(Enum(RoleEnum), nullable=False)
-    camera_on = Column(Boolean, default=True, nullable=False)
-    current_score = Column(Float, default=100.0, nullable=False)
-    current_status = Column(String(80), default="Waiting", nullable=False)
+    # NOTE: role removed — all participants are students by design
+    # NOTE: camera_on / current_score / current_status removed — live state lives in RoomStore._live_cache
     joined_at = Column(DateTime, default=func.now(), nullable=False)
     left_at = Column(DateTime, nullable=True)
     last_score_update = Column(DateTime, nullable=True)
@@ -74,11 +72,6 @@ class RoomParticipant(Base):
     user = relationship("User", back_populates="participations")
     scores = relationship("FocusScore", back_populates="participant", cascade="all, delete")
     verification_flags = relationship("VerificationFlag", back_populates="participant", cascade="all, delete")
-
-    @property
-    def is_warning(self) -> bool:
-        # Assuming threshold of 55
-        return (not self.camera_on) or self.current_score <= 55.0
 
 
 class FocusScore(Base):
