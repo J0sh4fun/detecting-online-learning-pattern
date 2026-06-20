@@ -228,7 +228,8 @@ async def teacher_scores_socket(
         pass
     finally:
         socket_manager.disconnect_teacher(room_code, websocket)
-        # Chỉ end room khi không còn teacher nào kết nối (tránh end khi teacher reload tab)
+        # Delay 20s để chờ giáo viên reconnect nếu họ chỉ bấm F5 (reload trang)
+        await asyncio.sleep(20)
         if not socket_manager.teacher_sockets.get(room_code):
             await _auto_end_room(db, room_code)
 
